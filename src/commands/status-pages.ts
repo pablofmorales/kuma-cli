@@ -8,11 +8,29 @@ import { handleError, requireAuth } from "../utils/errors.js";
 export function statusPagesCommand(program: Command): void {
   const sp = program
     .command("status-pages")
-    .description("Manage status pages");
+    .description("View and manage public-facing status pages")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Subcommands:")}
+  ${chalk.cyan("status-pages list")}   List all status pages with their slugs and publish state
+
+${chalk.dim("Run")} ${chalk.cyan("kuma status-pages <subcommand> --help")} ${chalk.dim("for examples.")}
+`
+    );
 
   sp.command("list")
-    .description("List all status pages")
+    .description("List all status pages with title, slug, and published state")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma status-pages list")}
+  ${chalk.cyan("kuma status-pages list --json")}
+  ${chalk.cyan("kuma status-pages list --json | jq '.data[] | select(.published) | .slug'")}
+`
+    )
     .action(async (opts: { json?: boolean }) => {
       const config = getConfig();
       if (!config) requireAuth(opts);

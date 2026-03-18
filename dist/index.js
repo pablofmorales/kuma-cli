@@ -29989,7 +29989,20 @@ function requireAuth(opts) {
 // src/commands/login.ts
 var { prompt } = import_enquirer.default;
 function loginCommand(program3) {
-  program3.command("login <url>").description("Authenticate with Uptime Kuma and save session").option("--json", "Output as JSON ({ ok, data })").action(async (url2, opts) => {
+  program3.command("login <url>").description(
+    "Authenticate with an Uptime Kuma instance and save the session token locally"
+  ).option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma login https://kuma.example.com")}
+  ${source_default.cyan("kuma login https://kuma.example.com --json")}
+
+${source_default.dim("Notes:")}
+  Credentials are never stored \u2014 only the session token is saved.
+  Token location: run ${source_default.cyan("kuma status")} to see the config path.
+`
+  ).action(async (url2, opts) => {
     const json = isJsonMode(opts);
     try {
       const normalizedUrl = url2.replace(/\/$/, "");
@@ -30031,7 +30044,14 @@ function loginCommand(program3) {
 
 // src/commands/logout.ts
 function logoutCommand(program3) {
-  program3.command("logout").description("Clear saved session credentials").option("--json", "Output as JSON ({ ok, data })").action((opts) => {
+  program3.command("logout").description("Clear the saved session token (you will need to run login again)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma logout")}
+  ${source_default.cyan("kuma logout --json")}
+`
+  ).action((opts) => {
     const json = isJsonMode(opts);
     const config = getConfig();
     if (!config) {
@@ -30068,11 +30088,33 @@ var MONITOR_TYPES = [
   "redis"
 ];
 function monitorsCommand(program3) {
-  const monitors = program3.command("monitors").description("Manage monitors");
-  monitors.command("list").description("List all monitors").option("--json", "Output as JSON ({ ok, data })").option(
+  const monitors = program3.command("monitors").description("Create, view, update, pause, resume, and delete monitors").addHelpText(
+    "after",
+    `
+${source_default.dim("Subcommands:")}
+  ${source_default.cyan("monitors list")}          List all monitors with status and uptime
+  ${source_default.cyan("monitors add")}           Add a new monitor (interactive or via flags)
+  ${source_default.cyan("monitors update <id>")}   Update name, URL, or interval of a monitor
+  ${source_default.cyan("monitors delete <id>")}   Permanently delete a monitor
+  ${source_default.cyan("monitors pause <id>")}    Pause checks for a monitor
+  ${source_default.cyan("monitors resume <id>")}   Resume checks for a paused monitor
+
+${source_default.dim("Run")} ${source_default.cyan("kuma monitors <subcommand> --help")} ${source_default.dim("for per-command examples.")}
+`
+  );
+  monitors.command("list").description("List all monitors with live status, uptime, and ping").option("--json", "Output as JSON ({ ok, data })").option(
     "--status <status>",
-    "Filter by status: up, down, pending, maintenance"
-  ).option("--tag <tag>", "Filter by tag name").action(
+    "Filter to a specific status: up, down, pending, maintenance"
+  ).option("--tag <tag>", "Filter to monitors that have this tag name").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors list")}                        List all monitors
+  ${source_default.cyan("kuma monitors list --status down")}          Show only DOWN monitors
+  ${source_default.cyan("kuma monitors list --tag production")}       Filter by tag
+  ${source_default.cyan("kuma monitors list --json | jq '.data[].name'")}
+`
+  ).action(
     async (opts) => {
       const config = getConfig();
       if (!config) requireAuth(opts);
@@ -30152,7 +30194,16 @@ ${list.length} monitor(s) total`);
       }
     }
   );
-  monitors.command("add").description("Add a new monitor").option("--name <name>", "Monitor name").option("--type <type>", "Monitor type (http, tcp, ping, ...)").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds", "60").option("--json", "Output as JSON ({ ok, data })").action(
+  monitors.command("add").description("Add a new monitor \u2014 runs interactively if flags are omitted").option("--name <name>", "Display name for the monitor").option("--type <type>", "Monitor type: http, tcp, ping, dns, push, steam, ...").option("--url <url>", "URL (http), hostname:port (tcp), or hostname (ping/dns)").option("--interval <seconds>", "How often to check, in seconds (default: 60)", "60").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors add")}                                          Interactive mode
+  ${source_default.cyan('kuma monitors add --name "My API" --type http --url https://api.example.com')}
+  ${source_default.cyan('kuma monitors add --name "DB" --type tcp --url db.host:5432 --interval 30')}
+  ${source_default.cyan('kuma monitors add --name "Ping" --type ping --url 8.8.8.8 --json')}
+`
+  ).action(
     async (opts) => {
       const config = getConfig();
       if (!config) requireAuth(opts);
@@ -30195,7 +30246,17 @@ ${list.length} monitor(s) total`);
       }
     }
   );
-  monitors.command("update <id>").description("Update an existing monitor's settings").option("--name <name>", "New monitor name").option("--url <url>", "New URL or hostname").option("--interval <seconds>", "New check interval in seconds").option("--active", "Activate (resume) the monitor").option("--no-active", "Deactivate (pause) the monitor").option("--json", "Output as JSON ({ ok, data })").action(
+  monitors.command("update <id>").description("Update the name, URL, interval, or active state of a monitor").option("--name <name>", "Set a new display name").option("--url <url>", "Set a new URL or hostname").option("--interval <seconds>", "Set a new check interval (seconds)").option("--active", "Resume the monitor (mark as active)").option("--no-active", "Pause the monitor (mark as inactive)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan('kuma monitors update 42 --name "Prod API"')}
+  ${source_default.cyan("kuma monitors update 42 --url https://new-url.com --interval 30")}
+  ${source_default.cyan("kuma monitors update 42 --no-active")}          Pause the monitor
+  ${source_default.cyan("kuma monitors update 42 --active")}             Resume the monitor
+  ${source_default.cyan('kuma monitors update 42 --name "New" --json')}
+`
+  ).action(
     async (id, opts) => {
       const config = getConfig();
       if (!config) requireAuth(opts);
@@ -30263,7 +30324,17 @@ ${list.length} monitor(s) total`);
       }
     }
   );
-  monitors.command("delete <id>").description("Delete a monitor").option("--force", "Skip confirmation").option("--json", "Output as JSON ({ ok, data })").action(async (id, opts) => {
+  monitors.command("delete <id>").description("Permanently delete a monitor and all its history").option("--force", "Skip the confirmation prompt").option("--json", "Output as JSON ({ ok, data }) \u2014 skips confirmation prompt").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors delete 42")}              Prompt for confirmation first
+  ${source_default.cyan("kuma monitors delete 42 --force")}      Delete without prompting
+  ${source_default.cyan("kuma monitors delete 42 --json")}       Non-interactive JSON output
+
+${source_default.dim("Note:")} This action is irreversible. All heartbeat history is deleted.
+`
+  ).action(async (id, opts) => {
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
@@ -30294,7 +30365,14 @@ ${list.length} monitor(s) total`);
       handleError(err, opts);
     }
   });
-  monitors.command("pause <id>").description("Pause a monitor").option("--json", "Output as JSON ({ ok, data })").action(async (id, opts) => {
+  monitors.command("pause <id>").description("Pause a monitor \u2014 stops checks without deleting it").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors pause 42")}
+  ${source_default.cyan("kuma monitors pause 42 --json")}
+`
+  ).action(async (id, opts) => {
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
@@ -30313,7 +30391,14 @@ ${list.length} monitor(s) total`);
       handleError(err, opts);
     }
   });
-  monitors.command("resume <id>").description("Resume a monitor").option("--json", "Output as JSON ({ ok, data })").action(async (id, opts) => {
+  monitors.command("resume <id>").description("Resume checks for a paused monitor").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors resume 42")}
+  ${source_default.cyan("kuma monitors resume 42 --json")}
+`
+  ).action(async (id, opts) => {
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
@@ -30336,7 +30421,16 @@ ${list.length} monitor(s) total`);
 
 // src/commands/heartbeat.ts
 function heartbeatCommand(program3) {
-  program3.command("heartbeat <monitor-id>").description("View recent heartbeats for a monitor").option("--limit <n>", "Number of heartbeats to show", "20").option("--json", "Output as JSON ({ ok, data })").action(async (monitorId, opts) => {
+  program3.command("heartbeat <monitor-id>").description("View recent heartbeats (check results) for a monitor").option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma heartbeat 42")}                  Last 20 heartbeats for monitor 42
+  ${source_default.cyan("kuma heartbeat 42 --limit 50")}       Last 50 heartbeats
+  ${source_default.cyan("kuma heartbeat 42 --json")}           Machine-readable output
+  ${source_default.cyan("kuma heartbeat 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
+`
+  ).action(async (monitorId, opts) => {
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
@@ -30378,8 +30472,24 @@ Showing last ${recent.length} heartbeat(s)`);
 
 // src/commands/status-pages.ts
 function statusPagesCommand(program3) {
-  const sp = program3.command("status-pages").description("Manage status pages");
-  sp.command("list").description("List all status pages").option("--json", "Output as JSON ({ ok, data })").action(async (opts) => {
+  const sp = program3.command("status-pages").description("View and manage public-facing status pages").addHelpText(
+    "after",
+    `
+${source_default.dim("Subcommands:")}
+  ${source_default.cyan("status-pages list")}   List all status pages with their slugs and publish state
+
+${source_default.dim("Run")} ${source_default.cyan("kuma status-pages <subcommand> --help")} ${source_default.dim("for examples.")}
+`
+  );
+  sp.command("list").description("List all status pages with title, slug, and published state").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma status-pages list")}
+  ${source_default.cyan("kuma status-pages list --json")}
+  ${source_default.cyan("kuma status-pages list --json | jq '.data[] | select(.published) | .slug'")}
+`
+  ).action(async (opts) => {
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
@@ -30418,31 +30528,45 @@ function statusPagesCommand(program3) {
 
 // src/index.ts
 var program2 = new Command();
-program2.name("kuma").description("CLI for managing Uptime Kuma via Socket.IO API").version("0.1.0").addHelpText(
+program2.name("kuma").description("Manage Uptime Kuma monitors, heartbeats, and status pages from your terminal.").version("0.1.0").addHelpText(
+  "beforeAll",
+  `
+${source_default.bold.cyan("Uptime Kuma CLI")} \u2014 terminal control for your monitoring stack
+
+`
+).addHelpText(
   "after",
   `
-${source_default.dim("Examples:")}
-  ${source_default.cyan("kuma login https://kuma.example.com")}
-  ${source_default.cyan("kuma monitors list")}
+${source_default.bold("Quick Start:")}
+  ${source_default.cyan("kuma login https://kuma.example.com")}   Authenticate (saves session)
+  ${source_default.cyan("kuma monitors list")}                    List all monitors + status
   ${source_default.cyan('kuma monitors add --name "My API" --type http --url https://api.example.com')}
-  ${source_default.cyan("kuma heartbeat 1")}
-  ${source_default.cyan("kuma logout")}
+  ${source_default.cyan("kuma heartbeat 42")}                     View recent heartbeats for monitor 42
+  ${source_default.cyan("kuma logout")}                           Clear saved session
 
-${source_default.dim("JSON mode (any command):")}
-  ${source_default.cyan("kuma monitors list --json")}
-  ${source_default.cyan("KUMA_JSON=1 kuma monitors list")}
+${source_default.bold("JSON / scripting mode:")}
+  ${source_default.cyan("kuma monitors list --json")}             Output as ${source_default.dim("{ ok, data }")} for piping
+  ${source_default.cyan("KUMA_JSON=1 kuma monitors list")}        Activate JSON mode globally via env var
+  ${source_default.cyan("kuma monitors list --json | jq '.data[].name'")}
 
-${source_default.dim("Exit codes:")}
+${source_default.bold("Exit codes:")}
   ${source_default.yellow("0")}  Success
   ${source_default.yellow("1")}  General error
-  ${source_default.yellow("2")}  Connection error
+  ${source_default.yellow("2")}  Connection / network error
   ${source_default.yellow("3")}  Not found
-  ${source_default.yellow("4")}  Auth error
+  ${source_default.yellow("4")}  Auth error (session expired \u2014 run ${source_default.cyan("kuma login")} again)
 
 ${source_default.dim("Config stored at:")} ${source_default.yellow(getConfigPath())}
 `
 );
-program2.command("status").description("Show current connection config").option("--json", "Output as JSON ({ ok, data })").action((opts) => {
+program2.command("status").description("Show the current connection config and login state").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  "after",
+  `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma status")}              Check if you are logged in
+  ${source_default.cyan("kuma status --json")}       Machine-readable login state
+`
+).action((opts) => {
   const json = isJsonMode(opts);
   const config = getConfig();
   if (!config) {
@@ -30460,9 +30584,9 @@ program2.command("status").description("Show current connection config").option(
     });
   }
   console.log(source_default.green("\u2705 Logged in"));
-  console.log(`   URL:   ${source_default.cyan(config.url)}`);
+  console.log(`   URL:    ${source_default.cyan(config.url)}`);
   console.log(
-    `   Token: ${source_default.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
+    `   Token:  ${source_default.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
   );
   console.log(`   Config: ${source_default.dim(getConfigPath())}`);
 });

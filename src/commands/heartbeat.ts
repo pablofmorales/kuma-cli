@@ -10,13 +10,24 @@ import {
   jsonOut,
 } from "../utils/output.js";
 import { handleError, requireAuth } from "../utils/errors.js";
+import chalk from "chalk";
 
 export function heartbeatCommand(program: Command): void {
   program
     .command("heartbeat <monitor-id>")
-    .description("View recent heartbeats for a monitor")
-    .option("--limit <n>", "Number of heartbeats to show", "20")
+    .description("View recent heartbeats (check results) for a monitor")
+    .option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma heartbeat 42")}                  Last 20 heartbeats for monitor 42
+  ${chalk.cyan("kuma heartbeat 42 --limit 50")}       Last 50 heartbeats
+  ${chalk.cyan("kuma heartbeat 42 --json")}           Machine-readable output
+  ${chalk.cyan("kuma heartbeat 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
+`
+    )
     .action(async (monitorId: string, opts: { limit?: string; json?: boolean }) => {
       const config = getConfig();
       if (!config) requireAuth(opts);

@@ -13,6 +13,7 @@ import {
   jsonOut,
 } from "../utils/output.js";
 import { handleError, requireAuth } from "../utils/errors.js";
+import chalk from "chalk";
 
 const { prompt } = enquirer as any;
 
@@ -33,18 +34,44 @@ const MONITOR_TYPES = [
 ];
 
 export function monitorsCommand(program: Command): void {
-  const monitors = program.command("monitors").description("Manage monitors");
+  const monitors = program
+    .command("monitors")
+    .description("Create, view, update, pause, resume, and delete monitors")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Subcommands:")}
+  ${chalk.cyan("monitors list")}          List all monitors with status and uptime
+  ${chalk.cyan("monitors add")}           Add a new monitor (interactive or via flags)
+  ${chalk.cyan("monitors update <id>")}   Update name, URL, or interval of a monitor
+  ${chalk.cyan("monitors delete <id>")}   Permanently delete a monitor
+  ${chalk.cyan("monitors pause <id>")}    Pause checks for a monitor
+  ${chalk.cyan("monitors resume <id>")}   Resume checks for a paused monitor
+
+${chalk.dim("Run")} ${chalk.cyan("kuma monitors <subcommand> --help")} ${chalk.dim("for per-command examples.")}
+`
+    );
 
   // LIST
   monitors
     .command("list")
-    .description("List all monitors")
+    .description("List all monitors with live status, uptime, and ping")
     .option("--json", "Output as JSON ({ ok, data })")
     .option(
       "--status <status>",
-      "Filter by status: up, down, pending, maintenance"
+      "Filter to a specific status: up, down, pending, maintenance"
     )
-    .option("--tag <tag>", "Filter by tag name")
+    .option("--tag <tag>", "Filter to monitors that have this tag name")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors list")}                        List all monitors
+  ${chalk.cyan("kuma monitors list --status down")}          Show only DOWN monitors
+  ${chalk.cyan("kuma monitors list --tag production")}       Filter by tag
+  ${chalk.cyan("kuma monitors list --json | jq '.data[].name'")}
+`
+    )
     .action(
       async (opts: { json?: boolean; status?: string; tag?: string }) => {
         const config = getConfig();
@@ -149,12 +176,22 @@ export function monitorsCommand(program: Command): void {
   // ADD
   monitors
     .command("add")
-    .description("Add a new monitor")
-    .option("--name <name>", "Monitor name")
-    .option("--type <type>", "Monitor type (http, tcp, ping, ...)")
-    .option("--url <url>", "URL or hostname to monitor")
-    .option("--interval <seconds>", "Check interval in seconds", "60")
+    .description("Add a new monitor — runs interactively if flags are omitted")
+    .option("--name <name>", "Display name for the monitor")
+    .option("--type <type>", "Monitor type: http, tcp, ping, dns, push, steam, ...")
+    .option("--url <url>", "URL (http), hostname:port (tcp), or hostname (ping/dns)")
+    .option("--interval <seconds>", "How often to check, in seconds (default: 60)", "60")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors add")}                                          Interactive mode
+  ${chalk.cyan("kuma monitors add --name \"My API\" --type http --url https://api.example.com")}
+  ${chalk.cyan("kuma monitors add --name \"DB\" --type tcp --url db.host:5432 --interval 30")}
+  ${chalk.cyan("kuma monitors add --name \"Ping\" --type ping --url 8.8.8.8 --json")}
+`
+    )
     .action(
       async (opts: {
         name?: string;
@@ -220,13 +257,24 @@ export function monitorsCommand(program: Command): void {
   // UPDATE
   monitors
     .command("update <id>")
-    .description("Update an existing monitor's settings")
-    .option("--name <name>", "New monitor name")
-    .option("--url <url>", "New URL or hostname")
-    .option("--interval <seconds>", "New check interval in seconds")
-    .option("--active", "Activate (resume) the monitor")
-    .option("--no-active", "Deactivate (pause) the monitor")
+    .description("Update the name, URL, interval, or active state of a monitor")
+    .option("--name <name>", "Set a new display name")
+    .option("--url <url>", "Set a new URL or hostname")
+    .option("--interval <seconds>", "Set a new check interval (seconds)")
+    .option("--active", "Resume the monitor (mark as active)")
+    .option("--no-active", "Pause the monitor (mark as inactive)")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors update 42 --name \"Prod API\"")}
+  ${chalk.cyan("kuma monitors update 42 --url https://new-url.com --interval 30")}
+  ${chalk.cyan("kuma monitors update 42 --no-active")}          Pause the monitor
+  ${chalk.cyan("kuma monitors update 42 --active")}             Resume the monitor
+  ${chalk.cyan("kuma monitors update 42 --name \"New\" --json")}
+`
+    )
     .action(
       async (
         id: string,
@@ -328,9 +376,20 @@ export function monitorsCommand(program: Command): void {
   // DELETE
   monitors
     .command("delete <id>")
-    .description("Delete a monitor")
-    .option("--force", "Skip confirmation")
-    .option("--json", "Output as JSON ({ ok, data })")
+    .description("Permanently delete a monitor and all its history")
+    .option("--force", "Skip the confirmation prompt")
+    .option("--json", "Output as JSON ({ ok, data }) — skips confirmation prompt")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors delete 42")}              Prompt for confirmation first
+  ${chalk.cyan("kuma monitors delete 42 --force")}      Delete without prompting
+  ${chalk.cyan("kuma monitors delete 42 --json")}       Non-interactive JSON output
+
+${chalk.dim("Note:")} This action is irreversible. All heartbeat history is deleted.
+`
+    )
     .action(async (id: string, opts: { force?: boolean; json?: boolean }) => {
       const config = getConfig();
       if (!config) requireAuth(opts);
@@ -372,8 +431,16 @@ export function monitorsCommand(program: Command): void {
   // PAUSE
   monitors
     .command("pause <id>")
-    .description("Pause a monitor")
+    .description("Pause a monitor — stops checks without deleting it")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors pause 42")}
+  ${chalk.cyan("kuma monitors pause 42 --json")}
+`
+    )
     .action(async (id: string, opts: { json?: boolean }) => {
       const config = getConfig();
       if (!config) requireAuth(opts);
@@ -401,8 +468,16 @@ export function monitorsCommand(program: Command): void {
   // RESUME
   monitors
     .command("resume <id>")
-    .description("Resume a monitor")
+    .description("Resume checks for a paused monitor")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors resume 42")}
+  ${chalk.cyan("kuma monitors resume 42 --json")}
+`
+    )
     .action(async (id: string, opts: { json?: boolean }) => {
       const config = getConfig();
       if (!config) requireAuth(opts);

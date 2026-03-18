@@ -4,14 +4,29 @@ import { KumaClient } from "../client.js";
 import { saveConfig } from "../config.js";
 import { success, error, isJsonMode, jsonOut } from "../utils/output.js";
 import { handleError } from "../utils/errors.js";
+import chalk from "chalk";
 
 const { prompt } = enquirer as any;
 
 export function loginCommand(program: Command): void {
   program
     .command("login <url>")
-    .description("Authenticate with Uptime Kuma and save session")
+    .description(
+      "Authenticate with an Uptime Kuma instance and save the session token locally"
+    )
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma login https://kuma.example.com")}
+  ${chalk.cyan("kuma login https://kuma.example.com --json")}
+
+${chalk.dim("Notes:")}
+  Credentials are never stored — only the session token is saved.
+  Token location: run ${chalk.cyan("kuma status")} to see the config path.
+`
+    )
     .action(async (url: string, opts: { json?: boolean }) => {
       const json = isJsonMode(opts);
 

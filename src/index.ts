@@ -12,38 +12,54 @@ const program = new Command();
 
 program
   .name("kuma")
-  .description("CLI for managing Uptime Kuma via Socket.IO API")
+  .description("Manage Uptime Kuma monitors, heartbeats, and status pages from your terminal.")
   .version("0.1.0")
+  .addHelpText(
+    "beforeAll",
+    `
+${chalk.bold.cyan("Uptime Kuma CLI")} — terminal control for your monitoring stack
+
+`
+  )
   .addHelpText(
     "after",
     `
-${chalk.dim("Examples:")}
-  ${chalk.cyan("kuma login https://kuma.example.com")}
-  ${chalk.cyan("kuma monitors list")}
+${chalk.bold("Quick Start:")}
+  ${chalk.cyan("kuma login https://kuma.example.com")}   Authenticate (saves session)
+  ${chalk.cyan("kuma monitors list")}                    List all monitors + status
   ${chalk.cyan("kuma monitors add --name \"My API\" --type http --url https://api.example.com")}
-  ${chalk.cyan("kuma heartbeat 1")}
-  ${chalk.cyan("kuma logout")}
+  ${chalk.cyan("kuma heartbeat 42")}                     View recent heartbeats for monitor 42
+  ${chalk.cyan("kuma logout")}                           Clear saved session
 
-${chalk.dim("JSON mode (any command):")}
-  ${chalk.cyan("kuma monitors list --json")}
-  ${chalk.cyan("KUMA_JSON=1 kuma monitors list")}
+${chalk.bold("JSON / scripting mode:")}
+  ${chalk.cyan("kuma monitors list --json")}             Output as ${chalk.dim("{ ok, data }")} for piping
+  ${chalk.cyan("KUMA_JSON=1 kuma monitors list")}        Activate JSON mode globally via env var
+  ${chalk.cyan("kuma monitors list --json | jq '.data[].name'")}
 
-${chalk.dim("Exit codes:")}
+${chalk.bold("Exit codes:")}
   ${chalk.yellow("0")}  Success
   ${chalk.yellow("1")}  General error
-  ${chalk.yellow("2")}  Connection error
+  ${chalk.yellow("2")}  Connection / network error
   ${chalk.yellow("3")}  Not found
-  ${chalk.yellow("4")}  Auth error
+  ${chalk.yellow("4")}  Auth error (session expired — run ${chalk.cyan("kuma login")} again)
 
 ${chalk.dim("Config stored at:")} ${chalk.yellow(getConfigPath())}
 `
   );
 
-// Status command (quick check)
+// ── Status ────────────────────────────────────────────────────────────────────
 program
   .command("status")
-  .description("Show current connection config")
+  .description("Show the current connection config and login state")
   .option("--json", "Output as JSON ({ ok, data })")
+  .addHelpText(
+    "after",
+    `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma status")}              Check if you are logged in
+  ${chalk.cyan("kuma status --json")}       Machine-readable login state
+`
+  )
   .action((opts: { json?: boolean }) => {
     const json = isJsonMode(opts);
     const config = getConfig();
@@ -65,9 +81,9 @@ program
     }
 
     console.log(chalk.green("✅ Logged in"));
-    console.log(`   URL:   ${chalk.cyan(config.url)}`);
+    console.log(`   URL:    ${chalk.cyan(config.url)}`);
     console.log(
-      `   Token: ${chalk.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
+      `   Token:  ${chalk.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
     );
     console.log(`   Config: ${chalk.dim(getConfigPath())}`);
   });

@@ -1,12 +1,21 @@
 import { Command } from "commander";
 import { clearConfig, getConfig } from "../config.js";
 import { success, warn, isJsonMode, jsonOut } from "../utils/output.js";
+import chalk from "chalk";
 
 export function logoutCommand(program: Command): void {
   program
     .command("logout")
-    .description("Clear saved session credentials")
+    .description("Clear the saved session token (you will need to run login again)")
     .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma logout")}
+  ${chalk.cyan("kuma logout --json")}
+`
+    )
     .action((opts: { json?: boolean }) => {
       const json = isJsonMode(opts);
       const config = getConfig();
