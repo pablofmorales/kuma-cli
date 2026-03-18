@@ -1,0 +1,42 @@
+{
+  "name": "@blackasteroid/kuma-cli",
+  "version": "0.1.0",
+  "description": "CLI for managing Uptime Kuma via Socket.IO API",
+  "bin": {
+    "kuma": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "uptime-kuma",
+    "cli",
+    "monitoring"
+  ],
+  "author": "Black Asteroid",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackAsteroid/kuma-cli"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.3",
+    "conf": "^15.1.0",
+    "enquirer": "^2.4.1",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
