@@ -134,9 +134,11 @@ export class KumaClient {
       const monitors: Record<string, Monitor> = {};
       const heartbeats: Record<number, Heartbeat> = {};
       const uptimes: Record<string, number> = {};
-      let monitorListReceived = false;
 
       const mergeAndResolve = () => {
+        // Clean up persistent listeners
+        this.socket.off("heartbeatList");
+        this.socket.off("uptime");
         // Merge latest heartbeat + uptime into each monitor
         for (const [idStr, monitor] of Object.entries(monitors)) {
           const id = Number(idStr);
@@ -148,10 +150,10 @@ export class KumaClient {
         resolve(monitors);
       };
 
-      // Safety valve — resolve after 3s regardless
-      const safetyTimer = setTimeout(() => mergeAndResolve(), 3000);
+      // Safety valve — resolve after 5s regardless
+      const safetyTimer = setTimeout(() => mergeAndResolve(), 5000);
 
-      // Kuma pushes heartbeatList per monitor after auth: (monitorId, data[])
+      // Kuma pushes heartbeatList per monitor: (monitorId, data[])
       this.socket.on(
         "heartbeatList",
         (monitorId: number, data: Heartbeat[]) => {
@@ -161,7 +163,7 @@ export class KumaClient {
         }
       );
 
-      // Kuma pushes uptime per monitor after auth: (monitorId, period, value)
+      // Kuma pushes uptime per monitor: (monitorId, period, value)
       this.socket.on(
         "uptime",
         (monitorId: number, period: string, value: number) => {
@@ -169,17 +171,22 @@ export class KumaClient {
         }
       );
 
-      // Request the monitor list via callback
-      this.socket.emit(
-        "getMonitorList",
+      // Kuma sends the full monitor map via "monitorList" push event
+      // (the getMonitorList callback only returns {ok: true})
+      this.socket.once(
+        "monitorList",
         (data: Record<string, Monitor>) => {
           Object.assign(monitors, data);
-          monitorListReceived = true;
           clearTimeout(safetyTimer);
           // Give Kuma 1.5 s to push heartbeatList/uptime for all monitors
           setTimeout(() => mergeAndResolve(), 1500);
         }
       );
+
+      // Emit getMonitorList to trigger the server to push the monitorList event
+      this.socket.emit("getMonitorList", () => {
+        // Callback returns {ok: true} — actual data comes via push event above
+      });
     });
   }
 

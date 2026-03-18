@@ -211,21 +211,38 @@ export function monitorsCommand(program: Command): void {
     .option("--name <name>", "New monitor name")
     .option("--url <url>", "New URL or hostname")
     .option("--interval <seconds>", "New check interval in seconds")
+    .option("--active", "Activate (resume) the monitor")
+    .option("--no-active", "Deactivate (pause) the monitor")
     .action(
       async (
         id: string,
-        opts: { name?: string; url?: string; interval?: string }
+        opts: {
+          name?: string;
+          url?: string;
+          interval?: string;
+          active?: boolean;
+        }
       ) => {
         const config = getConfig();
         if (!config) requireAuth();
 
-        const patch: Record<string, string | number> = {};
-        if (opts.name) patch.name = opts.name;
-        if (opts.url) patch.url = opts.url;
-        if (opts.interval) patch.interval = parseInt(opts.interval, 10);
+        const monitorId = parseInt(id, 10);
+        if (isNaN(monitorId)) {
+          error(`Invalid monitor ID: ${id}`);
+          process.exit(1);
+        }
 
-        if (Object.keys(patch).length === 0) {
-          error("No fields to update. Use --name, --url, or --interval.");
+        // Determine which fields were explicitly provided
+        const hasPatch =
+          opts.name !== undefined ||
+          opts.url !== undefined ||
+          opts.interval !== undefined ||
+          opts.active !== undefined;
+
+        if (!hasPatch) {
+          error(
+            "No fields to update. Use --name, --url, --interval, --active, or --no-active."
+          );
           process.exit(1);
         }
 
@@ -234,9 +251,61 @@ export function monitorsCommand(program: Command): void {
             config!.url,
             config!.token
           );
-          await client.editMonitor(parseInt(id, 10), patch);
+
+          // Fetch full monitor list so we can send the complete object back
+          // (Kuma's editMonitor requires all fields, not just the diff)
+          const monitorMap = await client.getMonitorList();
+          const existing = monitorMap[String(monitorId)];
+
+          if (!existing) {
+            client.disconnect();
+            const ids = Object.keys(monitorMap).join(", ");
+            error(
+              `Monitor ${monitorId} not found. Available IDs: ${ids || "none"}`
+            );
+            process.exit(1);
+          }
+
+          // Build a human-readable summary of what changed
+          const changes: string[] = [];
+
+          // Apply field changes via editMonitor (name, url, interval)
+          const hasFieldChanges =
+            opts.name !== undefined ||
+            opts.url !== undefined ||
+            opts.interval !== undefined;
+
+          if (hasFieldChanges) {
+            const updated: Monitor = { ...existing };
+            if (opts.name !== undefined) {
+              updated.name = opts.name;
+              changes.push(`name → "${opts.name}"`);
+            }
+            if (opts.url !== undefined) {
+              updated.url = opts.url;
+              changes.push(`url → "${opts.url}"`);
+            }
+            if (opts.interval !== undefined) {
+              updated.interval = parseInt(opts.interval, 10);
+              changes.push(`interval → ${opts.interval}s`);
+            }
+            await client.editMonitor(monitorId, updated);
+          }
+
+          // Apply active/inactive via pauseMonitor / resumeMonitor
+          // (editMonitor ignores the active field — Kuma uses separate events)
+          if (opts.active !== undefined) {
+            if (opts.active) {
+              await client.resumeMonitor(monitorId);
+              changes.push("activated");
+            } else {
+              await client.pauseMonitor(monitorId);
+              changes.push("deactivated");
+            }
+          }
+
           client.disconnect();
-          success(`Monitor ${id} updated`);
+          success(`Monitor ${monitorId} updated (${changes.join(", ")})`);
         } catch (err) {
           handleError(err);
         }

@@ -27647,8 +27647,9 @@ var KumaClient = class {
       const monitors = {};
       const heartbeats = {};
       const uptimes = {};
-      let monitorListReceived = false;
       const mergeAndResolve = () => {
+        this.socket.off("heartbeatList");
+        this.socket.off("uptime");
         for (const [idStr, monitor] of Object.entries(monitors)) {
           const id = Number(idStr);
           const hb = heartbeats[id];
@@ -27658,7 +27659,7 @@ var KumaClient = class {
         }
         resolve(monitors);
       };
-      const safetyTimer = setTimeout(() => mergeAndResolve(), 3e3);
+      const safetyTimer = setTimeout(() => mergeAndResolve(), 5e3);
       this.socket.on(
         "heartbeatList",
         (monitorId, data) => {
@@ -27673,15 +27674,16 @@ var KumaClient = class {
           uptimes[`${monitorId}_${period}`] = value2;
         }
       );
-      this.socket.emit(
-        "getMonitorList",
+      this.socket.once(
+        "monitorList",
         (data) => {
           Object.assign(monitors, data);
-          monitorListReceived = true;
           clearTimeout(safetyTimer);
           setTimeout(() => mergeAndResolve(), 1500);
         }
       );
+      this.socket.emit("getMonitorList", () => {
+      });
     });
   }
   // BUG-01 fix: addMonitor uses callback, not a separate event
@@ -30138,16 +30140,20 @@ ${list.length} monitor(s) total`);
       }
     }
   );
-  monitors.command("update <id>").description("Update an existing monitor's settings").option("--name <name>", "New monitor name").option("--url <url>", "New URL or hostname").option("--interval <seconds>", "New check interval in seconds").action(
+  monitors.command("update <id>").description("Update an existing monitor's settings").option("--name <name>", "New monitor name").option("--url <url>", "New URL or hostname").option("--interval <seconds>", "New check interval in seconds").option("--active", "Activate (resume) the monitor").option("--no-active", "Deactivate (pause) the monitor").action(
     async (id, opts) => {
       const config = getConfig();
       if (!config) requireAuth();
-      const patch = {};
-      if (opts.name) patch.name = opts.name;
-      if (opts.url) patch.url = opts.url;
-      if (opts.interval) patch.interval = parseInt(opts.interval, 10);
-      if (Object.keys(patch).length === 0) {
-        error("No fields to update. Use --name, --url, or --interval.");
+      const monitorId = parseInt(id, 10);
+      if (isNaN(monitorId)) {
+        error(`Invalid monitor ID: ${id}`);
+        process.exit(1);
+      }
+      const hasPatch = opts.name !== void 0 || opts.url !== void 0 || opts.interval !== void 0 || opts.active !== void 0;
+      if (!hasPatch) {
+        error(
+          "No fields to update. Use --name, --url, --interval, --active, or --no-active."
+        );
         process.exit(1);
       }
       try {
@@ -30155,9 +30161,45 @@ ${list.length} monitor(s) total`);
           config.url,
           config.token
         );
-        await client.editMonitor(parseInt(id, 10), patch);
+        const monitorMap = await client.getMonitorList();
+        const existing = monitorMap[String(monitorId)];
+        if (!existing) {
+          client.disconnect();
+          const ids = Object.keys(monitorMap).join(", ");
+          error(
+            `Monitor ${monitorId} not found. Available IDs: ${ids || "none"}`
+          );
+          process.exit(1);
+        }
+        const changes = [];
+        const hasFieldChanges = opts.name !== void 0 || opts.url !== void 0 || opts.interval !== void 0;
+        if (hasFieldChanges) {
+          const updated = { ...existing };
+          if (opts.name !== void 0) {
+            updated.name = opts.name;
+            changes.push(`name \u2192 "${opts.name}"`);
+          }
+          if (opts.url !== void 0) {
+            updated.url = opts.url;
+            changes.push(`url \u2192 "${opts.url}"`);
+          }
+          if (opts.interval !== void 0) {
+            updated.interval = parseInt(opts.interval, 10);
+            changes.push(`interval \u2192 ${opts.interval}s`);
+          }
+          await client.editMonitor(monitorId, updated);
+        }
+        if (opts.active !== void 0) {
+          if (opts.active) {
+            await client.resumeMonitor(monitorId);
+            changes.push("activated");
+          } else {
+            await client.pauseMonitor(monitorId);
+            changes.push("deactivated");
+          }
+        }
         client.disconnect();
-        success(`Monitor ${id} updated`);
+        success(`Monitor ${monitorId} updated (${changes.join(", ")})`);
       } catch (err) {
         handleError(err);
       }
