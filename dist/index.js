@@ -30416,6 +30416,133 @@ function statusPagesCommand(program3) {
   });
 }
 
+// src/commands/upgrade.ts
+var import_child_process = require("child_process");
+var import_fs = require("fs");
+var import_path = require("path");
+function readCurrentVersion() {
+  try {
+    const pkgPath = (0, import_path.join)(__dirname, "..", "package.json");
+    const raw = (0, import_fs.readFileSync)(pkgPath, "utf8");
+    const pkg = JSON.parse(raw);
+    if (pkg.version) return pkg.version;
+  } catch {
+  }
+  try {
+    const pkgPath = (0, import_path.join)(__dirname, "package.json");
+    const raw = (0, import_fs.readFileSync)(pkgPath, "utf8");
+    const pkg = JSON.parse(raw);
+    if (pkg.version) return pkg.version;
+  } catch {
+  }
+  return "unknown";
+}
+async function fetchLatestRelease() {
+  try {
+    const res = await fetch(
+      "https://api.github.com/repos/BlackAsteroid/kuma-cli/releases/latest",
+      {
+        headers: {
+          "User-Agent": "kuma-cli-upgrade",
+          Accept: "application/vnd.github+json"
+        },
+        signal: AbortSignal.timeout(1e4)
+      }
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+function compareSemver(a, b) {
+  const pa = a.replace(/^v/, "").split(".").map(Number);
+  const pb = b.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff < 0) return -1;
+    if (diff > 0) return 1;
+  }
+  return 0;
+}
+function upgradeCommand(program3) {
+  program3.command("upgrade").description(
+    "Update kuma-cli to the latest version from GitHub"
+  ).option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma upgrade")}              Check for updates and upgrade if available
+  ${source_default.cyan("kuma upgrade --json")}       Machine-readable upgrade result
+`
+  ).action(async (opts) => {
+    const json = isJsonMode(opts);
+    const current = readCurrentVersion();
+    if (!json) {
+      console.log(`Current version: ${source_default.cyan(`v${current}`)}`);
+      process.stdout.write("Checking for latest release\u2026 ");
+    }
+    const release = await fetchLatestRelease();
+    if (!release) {
+      if (!json) console.log(source_default.red("failed"));
+      const msg = "Could not reach GitHub. Check your internet connection and try again.";
+      if (json) jsonError(msg, 2);
+      console.error(source_default.red(`
+\u274C ${msg}`));
+      process.exit(2);
+    }
+    const latest = release.tag_name.replace(/^v/, "");
+    if (!json) console.log(source_default.green("done"));
+    if (compareSemver(current, latest) >= 0) {
+      if (json) {
+        jsonOut({ current, latest, upgraded: false, reason: "Already up to date" });
+      }
+      console.log(
+        `Latest version: ${source_default.cyan(`v${latest}`)}
+` + source_default.green("\u2705 Already up to date \u2014 nothing to do.")
+      );
+      return;
+    }
+    if (!json) {
+      console.log(`Latest version:  ${source_default.cyan(`v${latest}`)}`);
+      console.log(
+        `
+${source_default.bold(`Upgrading kuma-cli`)} ${source_default.dim(`v${current}`)} \u2192 ${source_default.green(`v${latest}`)}\u2026`
+      );
+    }
+    try {
+      (0, import_child_process.execSync)("npm install -g github:BlackAsteroid/kuma-cli", {
+        stdio: json ? "pipe" : "inherit"
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      const isPermission = raw.toLowerCase().includes("permission") || raw.toLowerCase().includes("eacces") || raw.toLowerCase().includes("eperm");
+      if (json) {
+        jsonError(
+          isPermission ? "Permission denied. Try running with elevated permissions (sudo)." : `Upgrade failed: ${raw}`,
+          isPermission ? 4 : 1
+        );
+      }
+      if (isPermission) {
+        console.error(
+          source_default.red("\n\u274C Permission denied.") + " Try running with elevated permissions:\n" + source_default.cyan("   sudo kuma upgrade")
+        );
+      } else {
+        console.error(source_default.red(`
+\u274C Upgrade failed: ${raw}`));
+      }
+      process.exit(isPermission ? 4 : 1);
+    }
+    if (json) {
+      jsonOut({ current, latest, upgraded: true });
+    }
+    console.log(
+      source_default.green(`
+\u2705 kuma-cli upgraded to v${latest} successfully!`)
+    );
+  });
+}
+
 // src/index.ts
 var program2 = new Command();
 program2.name("kuma").description("CLI for managing Uptime Kuma via Socket.IO API").version("0.1.0").addHelpText(
@@ -30471,6 +30598,7 @@ logoutCommand(program2);
 monitorsCommand(program2);
 heartbeatCommand(program2);
 statusPagesCommand(program2);
+upgradeCommand(program2);
 program2.parse(process.argv);
 /*! Bundled license information:
 
