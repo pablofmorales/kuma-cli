@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { loginCommand } from "./commands/login.js";
+import { logoutCommand } from "./commands/logout.js";
 import { monitorsCommand } from "./commands/monitors.js";
 import { heartbeatCommand } from "./commands/heartbeat.js";
 import { statusPagesCommand } from "./commands/status-pages.js";
@@ -20,6 +21,7 @@ ${chalk.dim("Examples:")}
   ${chalk.cyan("kuma monitors list")}
   ${chalk.cyan("kuma monitors add --name \"My API\" --type http --url https://api.example.com")}
   ${chalk.cyan("kuma heartbeat 1")}
+  ${chalk.cyan("kuma logout")}
 
 ${chalk.dim("Config stored at:")} ${chalk.yellow(getConfigPath())}
 `
@@ -45,6 +47,7 @@ program
 
 // Register all commands
 loginCommand(program);
+logoutCommand(program);
 monitorsCommand(program);
 heartbeatCommand(program);
 statusPagesCommand(program);
