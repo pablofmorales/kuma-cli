@@ -160,6 +160,45 @@ export function monitorsCommand(program: Command): void {
       }
     );
 
+  // UPDATE
+  monitors
+    .command("update <id>")
+    .description("Update an existing monitor's settings")
+    .option("--name <name>", "New monitor name")
+    .option("--url <url>", "New URL or hostname")
+    .option("--interval <seconds>", "New check interval in seconds")
+    .action(
+      async (
+        id: string,
+        opts: { name?: string; url?: string; interval?: string }
+      ) => {
+        const config = getConfig();
+        if (!config) requireAuth();
+
+        const patch: Record<string, string | number> = {};
+        if (opts.name) patch.name = opts.name;
+        if (opts.url) patch.url = opts.url;
+        if (opts.interval) patch.interval = parseInt(opts.interval, 10);
+
+        if (Object.keys(patch).length === 0) {
+          error("No fields to update. Use --name, --url, or --interval.");
+          process.exit(1);
+        }
+
+        try {
+          const client = await createAuthenticatedClient(
+            config!.url,
+            config!.token
+          );
+          await client.editMonitor(parseInt(id, 10), patch);
+          client.disconnect();
+          success(`Monitor ${id} updated`);
+        } catch (err) {
+          handleError(err);
+        }
+      }
+    );
+
   // DELETE
   monitors
     .command("delete <id>")

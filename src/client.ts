@@ -114,6 +114,11 @@ export class KumaClient {
     }));
   }
 
+  async editMonitor(id: number, monitor: Partial<Monitor>): Promise<void> {
+    this.socket.emit("editMonitor", { ...monitor, id });
+    await this.waitFor("editMonitorResult");
+  }
+
   async deleteMonitor(id: number): Promise<void> {
     this.socket.emit("deleteMonitor", id);
     await this.waitFor("deleteMonitorResult");
