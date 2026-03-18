@@ -2,7 +2,7 @@ import { Command } from "commander";
 import enquirer from "enquirer";
 import { KumaClient } from "../client.js";
 import { saveConfig } from "../config.js";
-import { success, error } from "../utils/output.js";
+import { success, error, isJsonMode, jsonOut } from "../utils/output.js";
 import { handleError } from "../utils/errors.js";
 
 const { prompt } = enquirer as any;
@@ -11,7 +11,10 @@ export function loginCommand(program: Command): void {
   program
     .command("login <url>")
     .description("Authenticate with Uptime Kuma and save session")
-    .action(async (url: string) => {
+    .option("--json", "Output as JSON ({ ok, data })")
+    .action(async (url: string, opts: { json?: boolean }) => {
+      const json = isJsonMode(opts);
+
       try {
         // Normalize URL
         const normalizedUrl = url.replace(/\/$/, "");
@@ -41,14 +44,23 @@ export function loginCommand(program: Command): void {
         client.disconnect();
 
         if (!result.ok || !result.token) {
-          error(result.msg ?? "Login failed");
+          const msg = result.msg ?? "Login failed";
+          if (json) {
+            jsonOut({ error: msg });
+          }
+          error(msg);
           process.exit(1);
         }
 
         saveConfig({ url: normalizedUrl, token: result.token });
+
+        if (json) {
+          jsonOut({ url: normalizedUrl, username });
+        }
+
         success(`Logged in as ${username} → ${normalizedUrl}`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     });
 }

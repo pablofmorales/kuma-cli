@@ -29932,25 +29932,65 @@ function formatPing(ping) {
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleString();
 }
+function isJsonMode(opts) {
+  if (opts?.json) return true;
+  const env3 = process.env["KUMA_JSON"];
+  return env3 === "1" || env3 === "true" || env3 === "yes";
+}
+function jsonOut(data) {
+  console.log(JSON.stringify({ ok: true, data }, null, 2));
+  process.exit(0);
+}
+function jsonError(message, code = 1) {
+  console.log(JSON.stringify({ ok: false, error: message, code }, null, 2));
+  process.exit(code);
+}
 
 // src/utils/errors.ts
-function handleError(err, exitCode = 1) {
-  if (err instanceof Error) {
-    error(err.message);
-  } else {
-    error(String(err));
+var EXIT_CODES = {
+  SUCCESS: 0,
+  GENERAL: 1,
+  CONNECTION: 2,
+  NOT_FOUND: 3,
+  AUTH: 4
+};
+function exitCodeFor(err) {
+  if (!(err instanceof Error)) return EXIT_CODES.GENERAL;
+  const msg = err.message.toLowerCase();
+  if (msg.includes("connection") || msg.includes("timeout") || msg.includes("refused")) {
+    return EXIT_CODES.CONNECTION;
   }
-  process.exit(exitCode);
+  if (msg.includes("not found") || msg.includes("not exist")) {
+    return EXIT_CODES.NOT_FOUND;
+  }
+  if (msg.includes("auth") || msg.includes("session expired") || msg.includes("login")) {
+    return EXIT_CODES.AUTH;
+  }
+  return EXIT_CODES.GENERAL;
 }
-function requireAuth() {
-  error("Not authenticated. Run: kuma login <url>");
-  process.exit(1);
+function handleError(err, opts) {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = exitCodeFor(err);
+  if (isJsonMode(opts)) {
+    jsonError(message, code);
+  }
+  error(message);
+  process.exit(code);
+}
+function requireAuth(opts) {
+  const message = "Not authenticated. Run: kuma login <url>";
+  if (isJsonMode(opts)) {
+    jsonError(message, EXIT_CODES.AUTH);
+  }
+  error(message);
+  process.exit(EXIT_CODES.AUTH);
 }
 
 // src/commands/login.ts
 var { prompt } = import_enquirer.default;
 function loginCommand(program3) {
-  program3.command("login <url>").description("Authenticate with Uptime Kuma and save session").action(async (url2) => {
+  program3.command("login <url>").description("Authenticate with Uptime Kuma and save session").option("--json", "Output as JSON ({ ok, data })").action(async (url2, opts) => {
+    const json = isJsonMode(opts);
     try {
       const normalizedUrl = url2.replace(/\/$/, "");
       const answers = await prompt([
@@ -29971,26 +30011,40 @@ function loginCommand(program3) {
       const result = await client.login(username, password);
       client.disconnect();
       if (!result.ok || !result.token) {
-        error(result.msg ?? "Login failed");
+        const msg = result.msg ?? "Login failed";
+        if (json) {
+          jsonOut({ error: msg });
+        }
+        error(msg);
         process.exit(1);
       }
       saveConfig({ url: normalizedUrl, token: result.token });
+      if (json) {
+        jsonOut({ url: normalizedUrl, username });
+      }
       success(`Logged in as ${username} \u2192 ${normalizedUrl}`);
     } catch (err) {
-      handleError(err);
+      handleError(err, opts);
     }
   });
 }
 
 // src/commands/logout.ts
 function logoutCommand(program3) {
-  program3.command("logout").description("Clear saved session credentials").action(() => {
+  program3.command("logout").description("Clear saved session credentials").option("--json", "Output as JSON ({ ok, data })").action((opts) => {
+    const json = isJsonMode(opts);
     const config = getConfig();
     if (!config) {
+      if (json) {
+        jsonOut({ loggedOut: false, reason: "Not currently logged in" });
+      }
       warn("Not currently logged in.");
       return;
     }
     clearConfig();
+    if (json) {
+      jsonOut({ loggedOut: true });
+    }
     success("Logged out. Run `kuma login <url>` to authenticate again.");
   });
 }
@@ -30015,13 +30069,14 @@ var MONITOR_TYPES = [
 ];
 function monitorsCommand(program3) {
   const monitors = program3.command("monitors").description("Manage monitors");
-  monitors.command("list").description("List all monitors").option("--json", "Output raw JSON").option(
+  monitors.command("list").description("List all monitors").option("--json", "Output as JSON ({ ok, data })").option(
     "--status <status>",
     "Filter by status: up, down, pending, maintenance"
   ).option("--tag <tag>", "Filter by tag name").action(
     async (opts) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+      const json = isJsonMode(opts);
       const STATUS_MAP = {
         down: 0,
         up: 1,
@@ -30039,6 +30094,9 @@ function monitorsCommand(program3) {
         if (opts.status) {
           const statusKey = opts.status.toLowerCase();
           if (!(statusKey in STATUS_MAP)) {
+            if (json) {
+              jsonOut({ error: `Invalid status "${opts.status}". Valid values: up, down, pending, maintenance` });
+            }
             error(
               `Invalid status "${opts.status}". Valid values: up, down, pending, maintenance`
             );
@@ -30057,9 +30115,8 @@ function monitorsCommand(program3) {
             (m) => Array.isArray(m.tags) && m.tags.some((t) => t.name.toLowerCase() === tagName)
           );
         }
-        if (opts.json) {
-          console.log(JSON.stringify(list, null, 2));
-          return;
+        if (json) {
+          jsonOut(list);
         }
         if (list.length === 0) {
           console.log("No monitors found matching the given filters.");
@@ -30091,14 +30148,15 @@ function monitorsCommand(program3) {
         console.log(`
 ${list.length} monitor(s) total`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     }
   );
-  monitors.command("add").description("Add a new monitor").option("--name <name>", "Monitor name").option("--type <type>", "Monitor type (http, tcp, ping, ...)").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds", "60").action(
+  monitors.command("add").description("Add a new monitor").option("--name <name>", "Monitor name").option("--type <type>", "Monitor type (http, tcp, ping, ...)").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds", "60").option("--json", "Output as JSON ({ ok, data })").action(
     async (opts) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+      const json = isJsonMode(opts);
       try {
         const answers = await prompt2([
           ...!opts.name ? [{ type: "input", name: "name", message: "Monitor name:" }] : [],
@@ -30128,27 +30186,30 @@ ${list.length} monitor(s) total`);
         );
         const result = await client.addMonitor({ name, type, url: url2, interval });
         client.disconnect();
+        if (json) {
+          jsonOut({ id: result.id, name, type, url: url2, interval });
+        }
         success(`Monitor "${name}" created (ID: ${result.id})`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     }
   );
-  monitors.command("update <id>").description("Update an existing monitor's settings").option("--name <name>", "New monitor name").option("--url <url>", "New URL or hostname").option("--interval <seconds>", "New check interval in seconds").option("--active", "Activate (resume) the monitor").option("--no-active", "Deactivate (pause) the monitor").action(
+  monitors.command("update <id>").description("Update an existing monitor's settings").option("--name <name>", "New monitor name").option("--url <url>", "New URL or hostname").option("--interval <seconds>", "New check interval in seconds").option("--active", "Activate (resume) the monitor").option("--no-active", "Deactivate (pause) the monitor").option("--json", "Output as JSON ({ ok, data })").action(
     async (id, opts) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+      const json = isJsonMode(opts);
       const monitorId = parseInt(id, 10);
       if (isNaN(monitorId)) {
-        error(`Invalid monitor ID: ${id}`);
-        process.exit(1);
+        handleError(new Error(`Invalid monitor ID: ${id}`), opts);
       }
       const hasPatch = opts.name !== void 0 || opts.url !== void 0 || opts.interval !== void 0 || opts.active !== void 0;
       if (!hasPatch) {
-        error(
-          "No fields to update. Use --name, --url, --interval, --active, or --no-active."
+        handleError(
+          new Error("No fields to update. Use --name, --url, --interval, --active, or --no-active."),
+          opts
         );
-        process.exit(1);
       }
       try {
         const client = await createAuthenticatedClient(
@@ -30160,10 +30221,10 @@ ${list.length} monitor(s) total`);
         if (!existing) {
           client.disconnect();
           const ids = Object.keys(monitorMap).join(", ");
-          error(
-            `Monitor ${monitorId} not found. Available IDs: ${ids || "none"}`
+          handleError(
+            new Error(`Monitor ${monitorId} not found. Available IDs: ${ids || "none"}`),
+            opts
           );
-          process.exit(1);
         }
         const changes = [];
         const hasFieldChanges = opts.name !== void 0 || opts.url !== void 0 || opts.interval !== void 0;
@@ -30193,17 +30254,21 @@ ${list.length} monitor(s) total`);
           }
         }
         client.disconnect();
+        if (json) {
+          jsonOut({ id: monitorId, changes });
+        }
         success(`Monitor ${monitorId} updated (${changes.join(", ")})`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     }
   );
-  monitors.command("delete <id>").description("Delete a monitor").option("--force", "Skip confirmation").action(async (id, opts) => {
+  monitors.command("delete <id>").description("Delete a monitor").option("--force", "Skip confirmation").option("--json", "Output as JSON ({ ok, data })").action(async (id, opts) => {
     const config = getConfig();
-    if (!config) requireAuth();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
     try {
-      if (!opts.force) {
+      if (!opts.force && !json) {
         const { confirm } = await prompt2({
           type: "confirm",
           name: "confirm",
@@ -30221,14 +30286,18 @@ ${list.length} monitor(s) total`);
       );
       await client.deleteMonitor(parseInt(id, 10));
       client.disconnect();
+      if (json) {
+        jsonOut({ id: parseInt(id, 10), deleted: true });
+      }
       success(`Monitor ${id} deleted`);
     } catch (err) {
-      handleError(err);
+      handleError(err, opts);
     }
   });
-  monitors.command("pause <id>").description("Pause a monitor").action(async (id) => {
+  monitors.command("pause <id>").description("Pause a monitor").option("--json", "Output as JSON ({ ok, data })").action(async (id, opts) => {
     const config = getConfig();
-    if (!config) requireAuth();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
     try {
       const client = await createAuthenticatedClient(
         config.url,
@@ -30236,14 +30305,18 @@ ${list.length} monitor(s) total`);
       );
       await client.pauseMonitor(parseInt(id, 10));
       client.disconnect();
+      if (json) {
+        jsonOut({ id: parseInt(id, 10), paused: true });
+      }
       success(`Monitor ${id} paused`);
     } catch (err) {
-      handleError(err);
+      handleError(err, opts);
     }
   });
-  monitors.command("resume <id>").description("Resume a monitor").action(async (id) => {
+  monitors.command("resume <id>").description("Resume a monitor").option("--json", "Output as JSON ({ ok, data })").action(async (id, opts) => {
     const config = getConfig();
-    if (!config) requireAuth();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
     try {
       const client = await createAuthenticatedClient(
         config.url,
@@ -30251,18 +30324,22 @@ ${list.length} monitor(s) total`);
       );
       await client.resumeMonitor(parseInt(id, 10));
       client.disconnect();
+      if (json) {
+        jsonOut({ id: parseInt(id, 10), resumed: true });
+      }
       success(`Monitor ${id} resumed`);
     } catch (err) {
-      handleError(err);
+      handleError(err, opts);
     }
   });
 }
 
 // src/commands/heartbeat.ts
 function heartbeatCommand(program3) {
-  program3.command("heartbeat <monitor-id>").description("View recent heartbeats for a monitor").option("--limit <n>", "Number of heartbeats to show", "20").option("--json", "Output raw JSON").action(async (monitorId, opts) => {
+  program3.command("heartbeat <monitor-id>").description("View recent heartbeats for a monitor").option("--limit <n>", "Number of heartbeats to show", "20").option("--json", "Output as JSON ({ ok, data })").action(async (monitorId, opts) => {
     const config = getConfig();
-    if (!config) requireAuth();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
     try {
       const client = await createAuthenticatedClient(
         config.url,
@@ -30274,9 +30351,8 @@ function heartbeatCommand(program3) {
       client.disconnect();
       const limit = parseInt(opts.limit ?? "20", 10);
       const recent = heartbeats.slice(-limit).reverse();
-      if (opts.json) {
-        console.log(JSON.stringify(recent, null, 2));
-        return;
+      if (json) {
+        jsonOut(recent);
       }
       if (recent.length === 0) {
         console.log("No heartbeats found.");
@@ -30295,7 +30371,7 @@ function heartbeatCommand(program3) {
       console.log(`
 Showing last ${recent.length} heartbeat(s)`);
     } catch (err) {
-      handleError(err);
+      handleError(err, opts);
     }
   });
 }
@@ -30303,9 +30379,10 @@ Showing last ${recent.length} heartbeat(s)`);
 // src/commands/status-pages.ts
 function statusPagesCommand(program3) {
   const sp = program3.command("status-pages").description("Manage status pages");
-  sp.command("list").description("List all status pages").option("--json", "Output raw JSON").action(async (opts) => {
+  sp.command("list").description("List all status pages").option("--json", "Output as JSON ({ ok, data })").action(async (opts) => {
     const config = getConfig();
-    if (!config) requireAuth();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
     try {
       const client = await createAuthenticatedClient(
         config.url,
@@ -30314,9 +30391,8 @@ function statusPagesCommand(program3) {
       const pages = await client.getStatusPageList();
       client.disconnect();
       const list = Object.values(pages);
-      if (opts.json) {
-        console.log(JSON.stringify(list, null, 2));
-        return;
+      if (json) {
+        jsonOut(list);
       }
       if (list.length === 0) {
         console.log("No status pages found.");
@@ -30335,7 +30411,7 @@ function statusPagesCommand(program3) {
       });
       console.log(table.toString());
     } catch (err) {
-      handleError(err);
+      handleError(err, opts);
     }
   });
 }
@@ -30352,21 +30428,43 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma heartbeat 1")}
   ${source_default.cyan("kuma logout")}
 
+${source_default.dim("JSON mode (any command):")}
+  ${source_default.cyan("kuma monitors list --json")}
+  ${source_default.cyan("KUMA_JSON=1 kuma monitors list")}
+
+${source_default.dim("Exit codes:")}
+  ${source_default.yellow("0")}  Success
+  ${source_default.yellow("1")}  General error
+  ${source_default.yellow("2")}  Connection error
+  ${source_default.yellow("3")}  Not found
+  ${source_default.yellow("4")}  Auth error
+
 ${source_default.dim("Config stored at:")} ${source_default.yellow(getConfigPath())}
 `
 );
-program2.command("status").description("Show current connection config").action(() => {
+program2.command("status").description("Show current connection config").option("--json", "Output as JSON ({ ok, data })").action((opts) => {
+  const json = isJsonMode(opts);
   const config = getConfig();
   if (!config) {
+    if (json) {
+      jsonOut({ loggedIn: false });
+    }
     console.log(source_default.yellow("Not logged in. Run: kuma login <url>"));
-  } else {
-    console.log(source_default.green("\u2705 Logged in"));
-    console.log(`   URL:   ${source_default.cyan(config.url)}`);
-    console.log(
-      `   Token: ${source_default.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
-    );
-    console.log(`   Config: ${source_default.dim(getConfigPath())}`);
+    return;
   }
+  if (json) {
+    jsonOut({
+      loggedIn: true,
+      url: config.url,
+      configPath: getConfigPath()
+    });
+  }
+  console.log(source_default.green("\u2705 Logged in"));
+  console.log(`   URL:   ${source_default.cyan(config.url)}`);
+  console.log(
+    `   Token: ${source_default.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
+  );
+  console.log(`   Config: ${source_default.dim(getConfigPath())}`);
 });
 loginCommand(program2);
 logoutCommand(program2);

@@ -6,6 +6,8 @@ import {
   statusLabel,
   formatPing,
   formatDate,
+  isJsonMode,
+  jsonOut,
 } from "../utils/output.js";
 import { handleError, requireAuth } from "../utils/errors.js";
 
@@ -14,10 +16,12 @@ export function heartbeatCommand(program: Command): void {
     .command("heartbeat <monitor-id>")
     .description("View recent heartbeats for a monitor")
     .option("--limit <n>", "Number of heartbeats to show", "20")
-    .option("--json", "Output raw JSON")
+    .option("--json", "Output as JSON ({ ok, data })")
     .action(async (monitorId: string, opts: { limit?: string; json?: boolean }) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
 
       try {
         const client = await createAuthenticatedClient(
@@ -32,9 +36,8 @@ export function heartbeatCommand(program: Command): void {
         const limit = parseInt(opts.limit ?? "20", 10);
         const recent = heartbeats.slice(-limit).reverse();
 
-        if (opts.json) {
-          console.log(JSON.stringify(recent, null, 2));
-          return;
+        if (json) {
+          jsonOut(recent);
         }
 
         if (recent.length === 0) {
@@ -56,7 +59,7 @@ export function heartbeatCommand(program: Command): void {
         console.log(table.toString());
         console.log(`\nShowing last ${recent.length} heartbeat(s)`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     });
 }

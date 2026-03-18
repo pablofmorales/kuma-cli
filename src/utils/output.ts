@@ -71,3 +71,37 @@ export function formatPing(ping?: number): string {
 export function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString();
 }
+
+// ---------------------------------------------------------------------------
+// JSON mode helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when JSON output is requested — either via the `--json` flag
+ * passed to a command, or the `KUMA_JSON` environment variable being set to
+ * any truthy value ("1", "true", "yes").
+ */
+export function isJsonMode(opts?: { json?: boolean }): boolean {
+  if (opts?.json) return true;
+  const env = process.env["KUMA_JSON"];
+  return env === "1" || env === "true" || env === "yes";
+}
+
+/**
+ * Emit a successful JSON response to stdout and exit 0.
+ * Shape: `{ "ok": true, "data": <payload> }`
+ */
+export function jsonOut(data: unknown): never {
+  console.log(JSON.stringify({ ok: true, data }, null, 2));
+  process.exit(0);
+}
+
+/**
+ * Emit an error JSON response to stdout (not stderr — so pipes work) and exit
+ * with the given code.
+ * Shape: `{ "ok": false, "error": "<message>", "code": <exitCode> }`
+ */
+export function jsonError(message: string, code = 1): never {
+  console.log(JSON.stringify({ ok: false, error: message, code }, null, 2));
+  process.exit(code);
+}

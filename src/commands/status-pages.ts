@@ -2,7 +2,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { createAuthenticatedClient } from "../client.js";
 import { getConfig } from "../config.js";
-import { createTable } from "../utils/output.js";
+import { createTable, isJsonMode, jsonOut } from "../utils/output.js";
 import { handleError, requireAuth } from "../utils/errors.js";
 
 export function statusPagesCommand(program: Command): void {
@@ -12,10 +12,12 @@ export function statusPagesCommand(program: Command): void {
 
   sp.command("list")
     .description("List all status pages")
-    .option("--json", "Output raw JSON")
+    .option("--json", "Output as JSON ({ ok, data })")
     .action(async (opts: { json?: boolean }) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
 
       try {
         const client = await createAuthenticatedClient(
@@ -27,9 +29,8 @@ export function statusPagesCommand(program: Command): void {
 
         const list = Object.values(pages);
 
-        if (opts.json) {
-          console.log(JSON.stringify(list, null, 2));
-          return;
+        if (json) {
+          jsonOut(list);
         }
 
         if (list.length === 0) {
@@ -52,7 +53,7 @@ export function statusPagesCommand(program: Command): void {
 
         console.log(table.toString());
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     });
 }

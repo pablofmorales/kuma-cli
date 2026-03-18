@@ -9,6 +9,8 @@ import {
   formatPing,
   success,
   error,
+  isJsonMode,
+  jsonOut,
 } from "../utils/output.js";
 import { handleError, requireAuth } from "../utils/errors.js";
 
@@ -37,7 +39,7 @@ export function monitorsCommand(program: Command): void {
   monitors
     .command("list")
     .description("List all monitors")
-    .option("--json", "Output raw JSON")
+    .option("--json", "Output as JSON ({ ok, data })")
     .option(
       "--status <status>",
       "Filter by status: up, down, pending, maintenance"
@@ -46,7 +48,9 @@ export function monitorsCommand(program: Command): void {
     .action(
       async (opts: { json?: boolean; status?: string; tag?: string }) => {
         const config = getConfig();
-        if (!config) requireAuth();
+        if (!config) requireAuth(opts);
+
+        const json = isJsonMode(opts);
 
         // Map human-readable status strings to numeric values
         const STATUS_MAP: Record<string, number> = {
@@ -70,6 +74,9 @@ export function monitorsCommand(program: Command): void {
           if (opts.status) {
             const statusKey = opts.status.toLowerCase();
             if (!(statusKey in STATUS_MAP)) {
+              if (json) {
+                jsonOut({ error: `Invalid status "${opts.status}". Valid values: up, down, pending, maintenance` });
+              }
               error(
                 `Invalid status "${opts.status}". Valid values: up, down, pending, maintenance`
               );
@@ -78,7 +85,6 @@ export function monitorsCommand(program: Command): void {
             const statusNum = STATUS_MAP[statusKey];
             list = list.filter((m: Monitor) => {
               if (m.heartbeat) return m.heartbeat.status === statusNum;
-              // For monitors with no heartbeat yet, match "pending" (2)
               if (statusNum === 2) return m.active && !m.heartbeat;
               return false;
             });
@@ -94,9 +100,8 @@ export function monitorsCommand(program: Command): void {
             );
           }
 
-          if (opts.json) {
-            console.log(JSON.stringify(list, null, 2));
-            return;
+          if (json) {
+            jsonOut(list);
           }
 
           if (list.length === 0) {
@@ -136,7 +141,7 @@ export function monitorsCommand(program: Command): void {
           console.log(table.toString());
           console.log(`\n${list.length} monitor(s) total`);
         } catch (err) {
-          handleError(err);
+          handleError(err, opts);
         }
       }
     );
@@ -149,15 +154,19 @@ export function monitorsCommand(program: Command): void {
     .option("--type <type>", "Monitor type (http, tcp, ping, ...)")
     .option("--url <url>", "URL or hostname to monitor")
     .option("--interval <seconds>", "Check interval in seconds", "60")
+    .option("--json", "Output as JSON ({ ok, data })")
     .action(
       async (opts: {
         name?: string;
         type?: string;
         url?: string;
         interval?: string;
+        json?: boolean;
       }) => {
         const config = getConfig();
-        if (!config) requireAuth();
+        if (!config) requireAuth(opts);
+
+        const json = isJsonMode(opts);
 
         try {
           const answers = await prompt([
@@ -197,9 +206,13 @@ export function monitorsCommand(program: Command): void {
           const result = await client.addMonitor({ name, type, url, interval });
           client.disconnect();
 
+          if (json) {
+            jsonOut({ id: result.id, name, type, url, interval });
+          }
+
           success(`Monitor "${name}" created (ID: ${result.id})`);
         } catch (err) {
-          handleError(err);
+          handleError(err, opts);
         }
       }
     );
@@ -213,6 +226,7 @@ export function monitorsCommand(program: Command): void {
     .option("--interval <seconds>", "New check interval in seconds")
     .option("--active", "Activate (resume) the monitor")
     .option("--no-active", "Deactivate (pause) the monitor")
+    .option("--json", "Output as JSON ({ ok, data })")
     .action(
       async (
         id: string,
@@ -221,18 +235,18 @@ export function monitorsCommand(program: Command): void {
           url?: string;
           interval?: string;
           active?: boolean;
+          json?: boolean;
         }
       ) => {
         const config = getConfig();
-        if (!config) requireAuth();
+        if (!config) requireAuth(opts);
 
+        const json = isJsonMode(opts);
         const monitorId = parseInt(id, 10);
         if (isNaN(monitorId)) {
-          error(`Invalid monitor ID: ${id}`);
-          process.exit(1);
+          handleError(new Error(`Invalid monitor ID: ${id}`), opts);
         }
 
-        // Determine which fields were explicitly provided
         const hasPatch =
           opts.name !== undefined ||
           opts.url !== undefined ||
@@ -240,10 +254,10 @@ export function monitorsCommand(program: Command): void {
           opts.active !== undefined;
 
         if (!hasPatch) {
-          error(
-            "No fields to update. Use --name, --url, --interval, --active, or --no-active."
+          handleError(
+            new Error("No fields to update. Use --name, --url, --interval, --active, or --no-active."),
+            opts
           );
-          process.exit(1);
         }
 
         try {
@@ -252,24 +266,20 @@ export function monitorsCommand(program: Command): void {
             config!.token
           );
 
-          // Fetch full monitor list so we can send the complete object back
-          // (Kuma's editMonitor requires all fields, not just the diff)
           const monitorMap = await client.getMonitorList();
           const existing = monitorMap[String(monitorId)];
 
           if (!existing) {
             client.disconnect();
             const ids = Object.keys(monitorMap).join(", ");
-            error(
-              `Monitor ${monitorId} not found. Available IDs: ${ids || "none"}`
+            handleError(
+              new Error(`Monitor ${monitorId} not found. Available IDs: ${ids || "none"}`),
+              opts
             );
-            process.exit(1);
           }
 
-          // Build a human-readable summary of what changed
           const changes: string[] = [];
 
-          // Apply field changes via editMonitor (name, url, interval)
           const hasFieldChanges =
             opts.name !== undefined ||
             opts.url !== undefined ||
@@ -292,8 +302,6 @@ export function monitorsCommand(program: Command): void {
             await client.editMonitor(monitorId, updated);
           }
 
-          // Apply active/inactive via pauseMonitor / resumeMonitor
-          // (editMonitor ignores the active field — Kuma uses separate events)
           if (opts.active !== undefined) {
             if (opts.active) {
               await client.resumeMonitor(monitorId);
@@ -305,9 +313,14 @@ export function monitorsCommand(program: Command): void {
           }
 
           client.disconnect();
+
+          if (json) {
+            jsonOut({ id: monitorId, changes });
+          }
+
           success(`Monitor ${monitorId} updated (${changes.join(", ")})`);
         } catch (err) {
-          handleError(err);
+          handleError(err, opts);
         }
       }
     );
@@ -317,12 +330,16 @@ export function monitorsCommand(program: Command): void {
     .command("delete <id>")
     .description("Delete a monitor")
     .option("--force", "Skip confirmation")
-    .action(async (id: string, opts: { force?: boolean }) => {
+    .option("--json", "Output as JSON ({ ok, data })")
+    .action(async (id: string, opts: { force?: boolean; json?: boolean }) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
 
       try {
-        if (!opts.force) {
+        if (!opts.force && !json) {
+          // Skip prompt in JSON mode — caller drives non-interactive flows
           const { confirm } = (await prompt({
             type: "confirm",
             name: "confirm",
@@ -342,9 +359,13 @@ export function monitorsCommand(program: Command): void {
         await client.deleteMonitor(parseInt(id, 10));
         client.disconnect();
 
+        if (json) {
+          jsonOut({ id: parseInt(id, 10), deleted: true });
+        }
+
         success(`Monitor ${id} deleted`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     });
 
@@ -352,9 +373,12 @@ export function monitorsCommand(program: Command): void {
   monitors
     .command("pause <id>")
     .description("Pause a monitor")
-    .action(async (id: string) => {
+    .option("--json", "Output as JSON ({ ok, data })")
+    .action(async (id: string, opts: { json?: boolean }) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
 
       try {
         const client = await createAuthenticatedClient(
@@ -363,9 +387,14 @@ export function monitorsCommand(program: Command): void {
         );
         await client.pauseMonitor(parseInt(id, 10));
         client.disconnect();
+
+        if (json) {
+          jsonOut({ id: parseInt(id, 10), paused: true });
+        }
+
         success(`Monitor ${id} paused`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     });
 
@@ -373,9 +402,12 @@ export function monitorsCommand(program: Command): void {
   monitors
     .command("resume <id>")
     .description("Resume a monitor")
-    .action(async (id: string) => {
+    .option("--json", "Output as JSON ({ ok, data })")
+    .action(async (id: string, opts: { json?: boolean }) => {
       const config = getConfig();
-      if (!config) requireAuth();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
 
       try {
         const client = await createAuthenticatedClient(
@@ -384,9 +416,14 @@ export function monitorsCommand(program: Command): void {
         );
         await client.resumeMonitor(parseInt(id, 10));
         client.disconnect();
+
+        if (json) {
+          jsonOut({ id: parseInt(id, 10), resumed: true });
+        }
+
         success(`Monitor ${id} resumed`);
       } catch (err) {
-        handleError(err);
+        handleError(err, opts);
       }
     });
 }
