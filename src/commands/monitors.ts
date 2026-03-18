@@ -17,6 +17,15 @@ import chalk from "chalk";
 
 const { prompt } = enquirer as any;
 
+/** Commander repeatable option collector for strings */
+function collect(val: string, prev: string[]): string[] {
+  return [...prev, val];
+}
+/** Commander repeatable option collector for integers */
+function collectInt(val: string, prev: number[]): number[] {
+  return [...prev, parseInt(val, 10)];
+}
+
 const MONITOR_TYPES = [
   "http",
   "tcp",
@@ -253,6 +262,103 @@ ${chalk.dim("Examples:")}
         }
       }
     );
+
+  // CREATE (non-interactive, with tag support — for CI/CD pipelines)
+  monitors
+    .command("create")
+    .description("Create a monitor non-interactively — designed for CI/CD pipelines")
+    .requiredOption("--name <name>", "Monitor display name")
+    .requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...")
+    .option("--url <url>", "URL or hostname to monitor")
+    .option("--interval <seconds>", "Check interval in seconds (default: 60)", "60")
+    .option("--tag <tag>", "Assign a tag by name (repeatable)", collect, [])
+    .option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, [])
+    .option("--json", "Output as JSON ({ ok, data }) — prints monitor ID to stdout")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors create --type http --name \"habitu.ar\" --url https://habitu.ar")}
+  ${chalk.cyan("kuma monitors create --type http --name \"My API\" --url https://api.example.com --tag Production --tag BlackAsteroid")}
+  ${chalk.cyan("kuma monitors create --type push --name \"GH Runner\" --json | jq '.data.id'")}
+  ${chalk.cyan("kuma monitors create --type tcp --name \"DB\" --url db.host:5432 --interval 30 --notification-id 1")}
+
+${chalk.dim("Pipeline usage:")}
+  ${chalk.cyan("MONITOR_ID=$(kuma monitors create --type http --name \"svc\" --url https://svc.example.com --json | jq '.data.id')")}
+  ${chalk.cyan("kuma monitors set-notification $MONITOR_ID --notification-id $NOTIF_ID")}
+`
+    )
+    .action(async (opts: {
+      name: string;
+      type: string;
+      url?: string;
+      interval?: string;
+      tag: string[];
+      notificationId: number[];
+      json?: boolean;
+    }) => {
+      const config = getConfig();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
+      const interval = parseInt(opts.interval ?? "60", 10);
+
+      // Validate required fields per type
+      if (["http", "keyword", "tcp", "ping", "dns"].includes(opts.type) && !opts.url) {
+        handleError(new Error(`--url is required for monitor type "${opts.type}"`), opts);
+      }
+
+      try {
+        const client = await createAuthenticatedClient(config!.url, config!.token);
+
+        // Create the monitor
+        const result = await client.addMonitor({
+          name: opts.name,
+          type: opts.type,
+          url: opts.url,
+          interval,
+        });
+        const monitorId = result.id;
+
+        // Assign tags if specified
+        if (opts.tag.length > 0) {
+          const allTags = await client.getTags();
+          const tagMap = new Map(allTags.map((t) => [t.name.toLowerCase(), t]));
+
+          for (const tagName of opts.tag) {
+            const found = tagMap.get(tagName.toLowerCase());
+            if (!found) {
+              if (!json) {
+                error(`Tag "${tagName}" not found — skipping (create it in the Kuma UI first)`);
+              }
+              continue;
+            }
+            await client.addMonitorTag(found.id, monitorId);
+          }
+        }
+
+        // Assign notifications if specified
+        if (opts.notificationId.length > 0) {
+          const monitorMap = await client.getMonitorList();
+          for (const notifId of opts.notificationId) {
+            await client.setMonitorNotification(monitorId, notifId, true, monitorMap);
+          }
+        }
+
+        client.disconnect();
+
+        if (json) {
+          jsonOut({ id: monitorId, name: opts.name, type: opts.type, url: opts.url, interval });
+        }
+
+        success(`Monitor "${opts.name}" created (ID: ${monitorId})`);
+        if (opts.tag.length > 0) {
+          console.log(`   Tags: ${opts.tag.join(", ")}`);
+        }
+      } catch (err) {
+        handleError(err, opts);
+      }
+    });
 
   // UPDATE
   monitors
@@ -497,6 +603,179 @@ ${chalk.dim("Examples:")}
         }
 
         success(`Monitor ${id} resumed`);
+      } catch (err) {
+        handleError(err, opts);
+      }
+    });
+
+  // BULK-PAUSE
+  monitors
+    .command("bulk-pause")
+    .description("Pause all monitors matching a tag or status filter")
+    .option("--tag <tag>", "Pause all monitors with this tag")
+    .option("--status <status>", "Pause all monitors with this status: up, down, pending, maintenance")
+    .option("--dry-run", "Preview which monitors would be paused without pausing them")
+    .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors bulk-pause --tag Production")}              Pause all Production monitors
+  ${chalk.cyan("kuma monitors bulk-pause --tag Production --dry-run")}    Preview without pausing
+  ${chalk.cyan("kuma monitors bulk-pause --tag Production --json")}       Machine-readable results
+
+${chalk.dim("CI/CD usage:")}
+  ${chalk.cyan("kuma monitors bulk-pause --tag Production && ./deploy.sh && kuma monitors bulk-resume --tag Production")}
+`
+    )
+    .action(async (opts: { tag?: string; status?: string; dryRun?: boolean; json?: boolean }) => {
+      const config = getConfig();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
+
+      if (!opts.tag && !opts.status) {
+        handleError(new Error("At least one of --tag or --status is required"), opts);
+      }
+
+      const STATUS_MAP: Record<string, number> = { down: 0, up: 1, pending: 2, maintenance: 3 };
+
+      try {
+        const client = await createAuthenticatedClient(config!.url, config!.token);
+        const monitorMap = await client.getMonitorList();
+        const all = Object.values(monitorMap);
+
+        let targets = all;
+        if (opts.tag) {
+          const tagName = opts.tag.toLowerCase();
+          targets = targets.filter((m) =>
+            Array.isArray(m.tags) && m.tags.some((t) => t.name.toLowerCase() === tagName)
+          );
+        }
+        if (opts.status) {
+          const statusNum = STATUS_MAP[opts.status.toLowerCase()];
+          if (statusNum === undefined) {
+            client.disconnect();
+            handleError(new Error(`Invalid status "${opts.status}". Valid: up, down, pending, maintenance`), opts);
+          }
+          targets = targets.filter((m) => m.heartbeat?.status === statusNum);
+        }
+
+        if (targets.length === 0) {
+          client.disconnect();
+          if (json) jsonOut({ affected: 0, results: [] });
+          console.log("No monitors matched the given filters.");
+          return;
+        }
+
+        if (opts.dryRun) {
+          client.disconnect();
+          const preview = targets.map((m) => ({ id: m.id, name: m.name }));
+          if (json) jsonOut({ dryRun: true, affected: targets.length, monitors: preview });
+          console.log(chalk.yellow(`Dry run — would pause ${targets.length} monitor(s):`));
+          preview.forEach((m) => console.log(`  ${chalk.dim(String(m.id).padStart(4))} ${m.name}`));
+          return;
+        }
+
+        const results = await client.bulkPause((m) => targets.some((t) => t.id === m.id));
+        client.disconnect();
+
+        const failed = results.filter((r) => !r.ok);
+
+        if (json) {
+          jsonOut({ affected: results.length, failed: failed.length, results });
+        }
+
+        console.log(`Paused ${results.length - failed.length}/${results.length} monitor(s)`);
+        if (failed.length > 0) {
+          failed.forEach((r) => error(`  Monitor ${r.id} (${r.name}): ${r.error}`));
+          process.exit(1);
+        }
+      } catch (err) {
+        handleError(err, opts);
+      }
+    });
+
+  // BULK-RESUME
+  monitors
+    .command("bulk-resume")
+    .description("Resume all monitors matching a tag or status filter")
+    .option("--tag <tag>", "Resume all monitors with this tag")
+    .option("--status <status>", "Resume all monitors with this status: up, down, pending, maintenance")
+    .option("--dry-run", "Preview which monitors would be resumed without resuming them")
+    .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma monitors bulk-resume --tag Production")}
+  ${chalk.cyan("kuma monitors bulk-resume --tag Production --dry-run")}
+  ${chalk.cyan("kuma monitors bulk-resume --tag Production --json")}
+`
+    )
+    .action(async (opts: { tag?: string; status?: string; dryRun?: boolean; json?: boolean }) => {
+      const config = getConfig();
+      if (!config) requireAuth(opts);
+
+      const json = isJsonMode(opts);
+
+      if (!opts.tag && !opts.status) {
+        handleError(new Error("At least one of --tag or --status is required"), opts);
+      }
+
+      const STATUS_MAP: Record<string, number> = { down: 0, up: 1, pending: 2, maintenance: 3 };
+
+      try {
+        const client = await createAuthenticatedClient(config!.url, config!.token);
+        const monitorMap = await client.getMonitorList();
+        const all = Object.values(monitorMap);
+
+        let targets = all;
+        if (opts.tag) {
+          const tagName = opts.tag.toLowerCase();
+          targets = targets.filter((m) =>
+            Array.isArray(m.tags) && m.tags.some((t) => t.name.toLowerCase() === tagName)
+          );
+        }
+        if (opts.status) {
+          const statusNum = STATUS_MAP[opts.status.toLowerCase()];
+          if (statusNum === undefined) {
+            client.disconnect();
+            handleError(new Error(`Invalid status "${opts.status}". Valid: up, down, pending, maintenance`), opts);
+          }
+          targets = targets.filter((m) => m.heartbeat?.status === statusNum);
+        }
+
+        if (targets.length === 0) {
+          client.disconnect();
+          if (json) jsonOut({ affected: 0, results: [] });
+          console.log("No monitors matched the given filters.");
+          return;
+        }
+
+        if (opts.dryRun) {
+          client.disconnect();
+          const preview = targets.map((m) => ({ id: m.id, name: m.name }));
+          if (json) jsonOut({ dryRun: true, affected: targets.length, monitors: preview });
+          console.log(chalk.yellow(`Dry run — would resume ${targets.length} monitor(s):`));
+          preview.forEach((m) => console.log(`  ${chalk.dim(String(m.id).padStart(4))} ${m.name}`));
+          return;
+        }
+
+        const results = await client.bulkResume((m) => targets.some((t) => t.id === m.id));
+        client.disconnect();
+
+        const failed = results.filter((r) => !r.ok);
+
+        if (json) {
+          jsonOut({ affected: results.length, failed: failed.length, results });
+        }
+
+        console.log(`Resumed ${results.length - failed.length}/${results.length} monitor(s)`);
+        if (failed.length > 0) {
+          failed.forEach((r) => error(`  Monitor ${r.id} (${r.name}): ${r.error}`));
+          process.exit(1);
+        }
       } catch (err) {
         handleError(err, opts);
       }

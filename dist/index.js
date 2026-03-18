@@ -27812,6 +27812,10 @@ var KumaClient = class {
       accepted_statuscodes: ["200-299"],
       maxretries: 1,
       retryInterval: 60,
+      conditions: [],
+      rabbitmqNodes: [],
+      kafkaProducerBrokers: [],
+      kafkaProducerSaslOptions: { mechanism: "none" },
       ...monitor
     };
     return new Promise((resolve, reject) => {
@@ -27969,6 +27973,50 @@ var KumaClient = class {
     });
   }
   // ---------------------------------------------------------------------------
+  // Tags
+  // ---------------------------------------------------------------------------
+  /** Get all tags defined in Kuma. Callback-based event. */
+  async getTags() {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("getTags timeout")), 1e4);
+      this.socket.emit(
+        "getTags",
+        (result) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Failed to fetch tags"));
+            return;
+          }
+          resolve(result.tags ?? []);
+        }
+      );
+    });
+  }
+  /**
+   * Add a tag to a monitor.
+   * socket.emit("addMonitorTag", tagID, monitorID, value, callback)
+   * value is a user-defined label string (can be empty "").
+   */
+  async addMonitorTag(tagId, monitorId, value2 = "") {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("addMonitorTag timeout")), 1e4);
+      this.socket.emit(
+        "addMonitorTag",
+        tagId,
+        monitorId,
+        value2,
+        (result) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Failed to add tag to monitor"));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
+  }
+  // ---------------------------------------------------------------------------
   // Notifications
   // ---------------------------------------------------------------------------
   /**
@@ -28071,6 +28119,45 @@ var KumaClient = class {
         }
       );
     });
+  }
+  // ---------------------------------------------------------------------------
+  // Bulk operations
+  // ---------------------------------------------------------------------------
+  /**
+   * Pause all monitors matching a filter function.
+   * Returns a list of { id, name, ok, error? } results.
+   */
+  async bulkPause(filter) {
+    const monitorMap = await this.getMonitorList();
+    const targets = Object.values(monitorMap).filter(filter);
+    const results = [];
+    for (const m of targets) {
+      try {
+        await this.pauseMonitor(m.id);
+        results.push({ id: m.id, name: m.name, ok: true });
+      } catch (e) {
+        results.push({ id: m.id, name: m.name, ok: false, error: e.message });
+      }
+    }
+    return results;
+  }
+  /**
+   * Resume all monitors matching a filter function.
+   * Returns a list of { id, name, ok, error? } results.
+   */
+  async bulkResume(filter) {
+    const monitorMap = await this.getMonitorList();
+    const targets = Object.values(monitorMap).filter(filter);
+    const results = [];
+    for (const m of targets) {
+      try {
+        await this.resumeMonitor(m.id);
+        results.push({ id: m.id, name: m.name, ok: true });
+      } catch (e) {
+        results.push({ id: m.id, name: m.name, ok: false, error: e.message });
+      }
+    }
+    return results;
   }
   disconnect() {
     this.socket.disconnect();
@@ -30339,6 +30426,12 @@ ${source_default.dim("Examples:")}
 // src/commands/monitors.ts
 var import_enquirer2 = __toESM(require_enquirer());
 var { prompt: prompt2 } = import_enquirer2.default;
+function collect(val, prev) {
+  return [...prev, val];
+}
+function collectInt(val, prev) {
+  return [...prev, parseInt(val, 10)];
+}
 var MONITOR_TYPES = [
   "http",
   "tcp",
@@ -30513,6 +30606,68 @@ ${source_default.dim("Examples:")}
       }
     }
   );
+  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID to stdout").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan('kuma monitors create --type http --name "habitu.ar" --url https://habitu.ar')}
+  ${source_default.cyan('kuma monitors create --type http --name "My API" --url https://api.example.com --tag Production --tag BlackAsteroid')}
+  ${source_default.cyan(`kuma monitors create --type push --name "GH Runner" --json | jq '.data.id'`)}
+  ${source_default.cyan('kuma monitors create --type tcp --name "DB" --url db.host:5432 --interval 30 --notification-id 1')}
+
+${source_default.dim("Pipeline usage:")}
+  ${source_default.cyan(`MONITOR_ID=$(kuma monitors create --type http --name "svc" --url https://svc.example.com --json | jq '.data.id')`)}
+  ${source_default.cyan("kuma monitors set-notification $MONITOR_ID --notification-id $NOTIF_ID")}
+`
+  ).action(async (opts) => {
+    const config = getConfig();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
+    const interval = parseInt(opts.interval ?? "60", 10);
+    if (["http", "keyword", "tcp", "ping", "dns"].includes(opts.type) && !opts.url) {
+      handleError(new Error(`--url is required for monitor type "${opts.type}"`), opts);
+    }
+    try {
+      const client = await createAuthenticatedClient(config.url, config.token);
+      const result = await client.addMonitor({
+        name: opts.name,
+        type: opts.type,
+        url: opts.url,
+        interval
+      });
+      const monitorId = result.id;
+      if (opts.tag.length > 0) {
+        const allTags = await client.getTags();
+        const tagMap = new Map(allTags.map((t) => [t.name.toLowerCase(), t]));
+        for (const tagName of opts.tag) {
+          const found = tagMap.get(tagName.toLowerCase());
+          if (!found) {
+            if (!json) {
+              error(`Tag "${tagName}" not found \u2014 skipping (create it in the Kuma UI first)`);
+            }
+            continue;
+          }
+          await client.addMonitorTag(found.id, monitorId);
+        }
+      }
+      if (opts.notificationId.length > 0) {
+        const monitorMap = await client.getMonitorList();
+        for (const notifId of opts.notificationId) {
+          await client.setMonitorNotification(monitorId, notifId, true, monitorMap);
+        }
+      }
+      client.disconnect();
+      if (json) {
+        jsonOut({ id: monitorId, name: opts.name, type: opts.type, url: opts.url, interval });
+      }
+      success(`Monitor "${opts.name}" created (ID: ${monitorId})`);
+      if (opts.tag.length > 0) {
+        console.log(`   Tags: ${opts.tag.join(", ")}`);
+      }
+    } catch (err) {
+      handleError(err, opts);
+    }
+  });
   monitors.command("update <id>").description("Update the name, URL, interval, or active state of a monitor").option("--name <name>", "Set a new display name").option("--url <url>", "Set a new URL or hostname").option("--interval <seconds>", "Set a new check interval (seconds)").option("--active", "Resume the monitor (mark as active)").option("--no-active", "Pause the monitor (mark as inactive)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
     "after",
     `
@@ -30684,6 +30839,137 @@ ${source_default.dim("Examples:")}
       handleError(err, opts);
     }
   });
+  monitors.command("bulk-pause").description("Pause all monitors matching a tag or status filter").option("--tag <tag>", "Pause all monitors with this tag").option("--status <status>", "Pause all monitors with this status: up, down, pending, maintenance").option("--dry-run", "Preview which monitors would be paused without pausing them").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors bulk-pause --tag Production")}              Pause all Production monitors
+  ${source_default.cyan("kuma monitors bulk-pause --tag Production --dry-run")}    Preview without pausing
+  ${source_default.cyan("kuma monitors bulk-pause --tag Production --json")}       Machine-readable results
+
+${source_default.dim("CI/CD usage:")}
+  ${source_default.cyan("kuma monitors bulk-pause --tag Production && ./deploy.sh && kuma monitors bulk-resume --tag Production")}
+`
+  ).action(async (opts) => {
+    const config = getConfig();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
+    if (!opts.tag && !opts.status) {
+      handleError(new Error("At least one of --tag or --status is required"), opts);
+    }
+    const STATUS_MAP = { down: 0, up: 1, pending: 2, maintenance: 3 };
+    try {
+      const client = await createAuthenticatedClient(config.url, config.token);
+      const monitorMap = await client.getMonitorList();
+      const all = Object.values(monitorMap);
+      let targets = all;
+      if (opts.tag) {
+        const tagName = opts.tag.toLowerCase();
+        targets = targets.filter(
+          (m) => Array.isArray(m.tags) && m.tags.some((t) => t.name.toLowerCase() === tagName)
+        );
+      }
+      if (opts.status) {
+        const statusNum = STATUS_MAP[opts.status.toLowerCase()];
+        if (statusNum === void 0) {
+          client.disconnect();
+          handleError(new Error(`Invalid status "${opts.status}". Valid: up, down, pending, maintenance`), opts);
+        }
+        targets = targets.filter((m) => m.heartbeat?.status === statusNum);
+      }
+      if (targets.length === 0) {
+        client.disconnect();
+        if (json) jsonOut({ affected: 0, results: [] });
+        console.log("No monitors matched the given filters.");
+        return;
+      }
+      if (opts.dryRun) {
+        client.disconnect();
+        const preview = targets.map((m) => ({ id: m.id, name: m.name }));
+        if (json) jsonOut({ dryRun: true, affected: targets.length, monitors: preview });
+        console.log(source_default.yellow(`Dry run \u2014 would pause ${targets.length} monitor(s):`));
+        preview.forEach((m) => console.log(`  ${source_default.dim(String(m.id).padStart(4))} ${m.name}`));
+        return;
+      }
+      const results = await client.bulkPause((m) => targets.some((t) => t.id === m.id));
+      client.disconnect();
+      const failed = results.filter((r) => !r.ok);
+      if (json) {
+        jsonOut({ affected: results.length, failed: failed.length, results });
+      }
+      console.log(`Paused ${results.length - failed.length}/${results.length} monitor(s)`);
+      if (failed.length > 0) {
+        failed.forEach((r) => error(`  Monitor ${r.id} (${r.name}): ${r.error}`));
+        process.exit(1);
+      }
+    } catch (err) {
+      handleError(err, opts);
+    }
+  });
+  monitors.command("bulk-resume").description("Resume all monitors matching a tag or status filter").option("--tag <tag>", "Resume all monitors with this tag").option("--status <status>", "Resume all monitors with this status: up, down, pending, maintenance").option("--dry-run", "Preview which monitors would be resumed without resuming them").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma monitors bulk-resume --tag Production")}
+  ${source_default.cyan("kuma monitors bulk-resume --tag Production --dry-run")}
+  ${source_default.cyan("kuma monitors bulk-resume --tag Production --json")}
+`
+  ).action(async (opts) => {
+    const config = getConfig();
+    if (!config) requireAuth(opts);
+    const json = isJsonMode(opts);
+    if (!opts.tag && !opts.status) {
+      handleError(new Error("At least one of --tag or --status is required"), opts);
+    }
+    const STATUS_MAP = { down: 0, up: 1, pending: 2, maintenance: 3 };
+    try {
+      const client = await createAuthenticatedClient(config.url, config.token);
+      const monitorMap = await client.getMonitorList();
+      const all = Object.values(monitorMap);
+      let targets = all;
+      if (opts.tag) {
+        const tagName = opts.tag.toLowerCase();
+        targets = targets.filter(
+          (m) => Array.isArray(m.tags) && m.tags.some((t) => t.name.toLowerCase() === tagName)
+        );
+      }
+      if (opts.status) {
+        const statusNum = STATUS_MAP[opts.status.toLowerCase()];
+        if (statusNum === void 0) {
+          client.disconnect();
+          handleError(new Error(`Invalid status "${opts.status}". Valid: up, down, pending, maintenance`), opts);
+        }
+        targets = targets.filter((m) => m.heartbeat?.status === statusNum);
+      }
+      if (targets.length === 0) {
+        client.disconnect();
+        if (json) jsonOut({ affected: 0, results: [] });
+        console.log("No monitors matched the given filters.");
+        return;
+      }
+      if (opts.dryRun) {
+        client.disconnect();
+        const preview = targets.map((m) => ({ id: m.id, name: m.name }));
+        if (json) jsonOut({ dryRun: true, affected: targets.length, monitors: preview });
+        console.log(source_default.yellow(`Dry run \u2014 would resume ${targets.length} monitor(s):`));
+        preview.forEach((m) => console.log(`  ${source_default.dim(String(m.id).padStart(4))} ${m.name}`));
+        return;
+      }
+      const results = await client.bulkResume((m) => targets.some((t) => t.id === m.id));
+      client.disconnect();
+      const failed = results.filter((r) => !r.ok);
+      if (json) {
+        jsonOut({ affected: results.length, failed: failed.length, results });
+      }
+      console.log(`Resumed ${results.length - failed.length}/${results.length} monitor(s)`);
+      if (failed.length > 0) {
+        failed.forEach((r) => error(`  Monitor ${r.id} (${r.name}): ${r.error}`));
+        process.exit(1);
+      }
+    } catch (err) {
+      handleError(err, opts);
+    }
+  });
   monitors.command("set-notification <id>").description("Assign or remove a notification channel from a monitor").requiredOption("--notification-id <nid>", "ID of the notification channel to assign").option("--remove", "Remove the notification instead of assigning it").option("--json", "Output as JSON ({ ok, data })").addHelpText(
     "after",
     `
@@ -30730,27 +31016,32 @@ ${source_default.dim("Bulk assign via pipe:")}
 
 // src/commands/heartbeat.ts
 function heartbeatCommand(program3) {
-  program3.command("heartbeat <monitor-id>").description("View recent heartbeats (check results) for a monitor").option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  const hb = program3.command("heartbeat").description("View heartbeat history or send push heartbeats to monitors").addHelpText(
+    "after",
+    `
+${source_default.dim("Subcommands:")}
+  ${source_default.cyan("heartbeat view <monitor-id>")}      View recent heartbeats for a monitor
+  ${source_default.cyan("heartbeat send <push-token>")}      Send a push heartbeat (for scripts / GitHub Actions)
+
+${source_default.dim("Run")} ${source_default.cyan("kuma heartbeat <subcommand> --help")} ${source_default.dim("for examples.")}
+`
+  );
+  hb.command("view <monitor-id>").description("View recent heartbeats (check results) for a monitor").option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20").option("--json", "Output as JSON ({ ok, data })").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
-  ${source_default.cyan("kuma heartbeat 42")}                  Last 20 heartbeats for monitor 42
-  ${source_default.cyan("kuma heartbeat 42 --limit 50")}       Last 50 heartbeats
-  ${source_default.cyan("kuma heartbeat 42 --json")}           Machine-readable output
-  ${source_default.cyan("kuma heartbeat 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
+  ${source_default.cyan("kuma heartbeat view 42")}                  Last 20 heartbeats for monitor 42
+  ${source_default.cyan("kuma heartbeat view 42 --limit 50")}       Last 50 heartbeats
+  ${source_default.cyan("kuma heartbeat view 42 --json")}           Machine-readable output
+  ${source_default.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
 `
   ).action(async (monitorId, opts) => {
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
     try {
-      const client = await createAuthenticatedClient(
-        config.url,
-        config.token
-      );
-      const heartbeats = await client.getHeartbeatList(
-        parseInt(monitorId, 10)
-      );
+      const client = await createAuthenticatedClient(config.url, config.token);
+      const heartbeats = await client.getHeartbeatList(parseInt(monitorId, 10));
       client.disconnect();
       const limit = parseInt(opts.limit ?? "20", 10);
       const recent = heartbeats.slice(-limit).reverse();
@@ -30762,12 +31053,12 @@ ${source_default.dim("Examples:")}
         return;
       }
       const table = createTable(["Time", "Status", "Ping", "Message"]);
-      recent.forEach((hb) => {
+      recent.forEach((hb2) => {
         table.push([
-          formatDate(hb.time),
-          statusLabel(hb.status),
-          formatPing(hb.ping),
-          hb.msg ?? "\u2014"
+          formatDate(hb2.time),
+          statusLabel(hb2.status),
+          formatPing(hb2.ping),
+          hb2.msg ?? "\u2014"
         ]);
       });
       console.log(table.toString());
@@ -30775,6 +31066,71 @@ ${source_default.dim("Examples:")}
 Showing last ${recent.length} heartbeat(s)`);
     } catch (err) {
       handleError(err, opts);
+    }
+  });
+  hb.command("send <push-token>").description("Send a push heartbeat to a Kuma push monitor (for scripts and GitHub Actions)").option("--status <status>", "Heartbeat status: up, down, maintenance (default: up)").option("--msg <message>", "Optional status message").option("--ping <ms>", "Optional response time in milliseconds").option("--url <url>", "Kuma base URL (defaults to saved login URL)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+    "after",
+    `
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma heartbeat send abc123")}
+  ${source_default.cyan('kuma heartbeat send abc123 --status down --msg "Job failed"')}
+  ${source_default.cyan('kuma heartbeat send abc123 --msg "Deploy complete" --ping 42')}
+  ${source_default.cyan("kuma heartbeat send abc123 --json")}
+
+${source_default.dim("GitHub Actions usage:")}
+  ${source_default.cyan("- name: Heartbeat")}
+  ${source_default.cyan("  run: kuma heartbeat send ${{ secrets.RUNNER_PUSH_TOKEN }}")}
+
+${source_default.dim("Finding your push token:")}
+  Create a "Push" monitor in Kuma UI. The push URL looks like:
+  https://kuma.example.com/api/push/<token>
+  Use the <token> part as the argument.
+`
+  ).action(async (pushToken, opts) => {
+    const json = isJsonMode(opts);
+    let baseUrl = opts.url;
+    if (!baseUrl) {
+      const config = getConfig();
+      if (!config) {
+        const msg = "No --url specified and not logged in. Run: kuma login <url> or use --url";
+        if (json) jsonOut({ ok: false, error: msg });
+        console.error(source_default.red(`\u274C ${msg}`));
+        process.exit(EXIT_CODES.AUTH);
+      }
+      baseUrl = config.url;
+    }
+    const STATUS_MAP = { up: "up", down: "down", maintenance: "maintenance" };
+    const statusKey = (opts.status ?? "up").toLowerCase();
+    if (!(statusKey in STATUS_MAP)) {
+      const msg = `Invalid status "${opts.status}". Valid: up, down, maintenance`;
+      if (json) jsonOut({ ok: false, error: msg });
+      console.error(source_default.red(`\u274C ${msg}`));
+      process.exit(EXIT_CODES.GENERAL);
+    }
+    const pushUrl = new URL(`${baseUrl.replace(/\/$/, "")}/api/push/${pushToken}`);
+    pushUrl.searchParams.set("status", statusKey);
+    if (opts.msg) pushUrl.searchParams.set("msg", opts.msg);
+    if (opts.ping) pushUrl.searchParams.set("ping", opts.ping);
+    try {
+      const res = await fetch(pushUrl.toString(), {
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        const msg = `Kuma push failed (HTTP ${res.status}): ${body}`;
+        if (json) jsonOut({ ok: false, error: msg });
+        console.error(source_default.red(`\u274C ${msg}`));
+        process.exit(EXIT_CODES.GENERAL);
+      }
+      if (json) {
+        jsonOut({ pushToken, status: statusKey, msg: opts.msg ?? null });
+      }
+      success(`Push heartbeat sent (${statusKey}${opts.msg ? ` \u2014 ${opts.msg}` : ""})`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (json) jsonOut({ ok: false, error: msg });
+      console.error(source_default.red(`\u274C ${msg}`));
+      process.exit(EXIT_CODES.CONNECTION);
     }
   });
 }

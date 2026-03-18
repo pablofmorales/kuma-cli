@@ -8,13 +8,29 @@ import {
   formatDate,
   isJsonMode,
   jsonOut,
+  success,
 } from "../utils/output.js";
-import { handleError, requireAuth } from "../utils/errors.js";
+import { handleError, requireAuth, EXIT_CODES } from "../utils/errors.js";
 import chalk from "chalk";
 
 export function heartbeatCommand(program: Command): void {
-  program
-    .command("heartbeat <monitor-id>")
+  const hb = program
+    .command("heartbeat")
+    .description("View heartbeat history or send push heartbeats to monitors")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Subcommands:")}
+  ${chalk.cyan("heartbeat view <monitor-id>")}      View recent heartbeats for a monitor
+  ${chalk.cyan("heartbeat send <push-token>")}      Send a push heartbeat (for scripts / GitHub Actions)
+
+${chalk.dim("Run")} ${chalk.cyan("kuma heartbeat <subcommand> --help")} ${chalk.dim("for examples.")}
+`
+    );
+
+  // ── VIEW ────────────────────────────────────────────────────────────────────
+  hb
+    .command("view <monitor-id>")
     .description("View recent heartbeats (check results) for a monitor")
     .option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20")
     .option("--json", "Output as JSON ({ ok, data })")
@@ -22,10 +38,10 @@ export function heartbeatCommand(program: Command): void {
       "after",
       `
 ${chalk.dim("Examples:")}
-  ${chalk.cyan("kuma heartbeat 42")}                  Last 20 heartbeats for monitor 42
-  ${chalk.cyan("kuma heartbeat 42 --limit 50")}       Last 50 heartbeats
-  ${chalk.cyan("kuma heartbeat 42 --json")}           Machine-readable output
-  ${chalk.cyan("kuma heartbeat 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
+  ${chalk.cyan("kuma heartbeat view 42")}                  Last 20 heartbeats for monitor 42
+  ${chalk.cyan("kuma heartbeat view 42 --limit 50")}       Last 50 heartbeats
+  ${chalk.cyan("kuma heartbeat view 42 --json")}           Machine-readable output
+  ${chalk.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
 `
     )
     .action(async (monitorId: string, opts: { limit?: string; json?: boolean }) => {
@@ -35,13 +51,8 @@ ${chalk.dim("Examples:")}
       const json = isJsonMode(opts);
 
       try {
-        const client = await createAuthenticatedClient(
-          config!.url,
-          config!.token
-        );
-        const heartbeats = await client.getHeartbeatList(
-          parseInt(monitorId, 10)
-        );
+        const client = await createAuthenticatedClient(config!.url, config!.token);
+        const heartbeats = await client.getHeartbeatList(parseInt(monitorId, 10));
         client.disconnect();
 
         const limit = parseInt(opts.limit ?? "20", 10);
@@ -57,7 +68,6 @@ ${chalk.dim("Examples:")}
         }
 
         const table = createTable(["Time", "Status", "Ping", "Message"]);
-
         recent.forEach((hb) => {
           table.push([
             formatDate(hb.time),
@@ -71,6 +81,97 @@ ${chalk.dim("Examples:")}
         console.log(`\nShowing last ${recent.length} heartbeat(s)`);
       } catch (err) {
         handleError(err, opts);
+      }
+    });
+
+  // ── SEND ─────────────────────────────────────────────────────────────────────
+  hb
+    .command("send <push-token>")
+    .description("Send a push heartbeat to a Kuma push monitor (for scripts and GitHub Actions)")
+    .option("--status <status>", "Heartbeat status: up, down, maintenance (default: up)")
+    .option("--msg <message>", "Optional status message")
+    .option("--ping <ms>", "Optional response time in milliseconds")
+    .option("--url <url>", "Kuma base URL (defaults to saved login URL)")
+    .option("--json", "Output as JSON ({ ok, data })")
+    .addHelpText(
+      "after",
+      `
+${chalk.dim("Examples:")}
+  ${chalk.cyan("kuma heartbeat send abc123")}
+  ${chalk.cyan("kuma heartbeat send abc123 --status down --msg \"Job failed\"")}
+  ${chalk.cyan("kuma heartbeat send abc123 --msg \"Deploy complete\" --ping 42")}
+  ${chalk.cyan("kuma heartbeat send abc123 --json")}
+
+${chalk.dim("GitHub Actions usage:")}
+  ${chalk.cyan("- name: Heartbeat")}
+  ${chalk.cyan("  run: kuma heartbeat send \${{ secrets.RUNNER_PUSH_TOKEN }}")}
+
+${chalk.dim("Finding your push token:")}
+  Create a \"Push\" monitor in Kuma UI. The push URL looks like:
+  https://kuma.example.com/api/push/<token>
+  Use the <token> part as the argument.
+`
+    )
+    .action(async (pushToken: string, opts: {
+      status?: string;
+      msg?: string;
+      ping?: string;
+      url?: string;
+      json?: boolean;
+    }) => {
+      const json = isJsonMode(opts);
+
+      // Determine base URL
+      let baseUrl = opts.url;
+      if (!baseUrl) {
+        const config = getConfig();
+        if (!config) {
+          const msg = "No --url specified and not logged in. Run: kuma login <url> or use --url";
+          if (json) jsonOut({ ok: false, error: msg });
+          console.error(chalk.red(`❌ ${msg}`));
+          process.exit(EXIT_CODES.AUTH);
+        }
+        baseUrl = config.url;
+      }
+
+      const STATUS_MAP: Record<string, string> = { up: "up", down: "down", maintenance: "maintenance" };
+      const statusKey = (opts.status ?? "up").toLowerCase();
+      if (!(statusKey in STATUS_MAP)) {
+        const msg = `Invalid status "${opts.status}". Valid: up, down, maintenance`;
+        if (json) jsonOut({ ok: false, error: msg });
+        console.error(chalk.red(`❌ ${msg}`));
+        process.exit(EXIT_CODES.GENERAL);
+      }
+
+      // Build the push URL
+      const pushUrl = new URL(`${baseUrl.replace(/\/$/, "")}/api/push/${pushToken}`);
+      pushUrl.searchParams.set("status", statusKey);
+      if (opts.msg) pushUrl.searchParams.set("msg", opts.msg);
+      if (opts.ping) pushUrl.searchParams.set("ping", opts.ping);
+
+      try {
+        const res = await fetch(pushUrl.toString(), {
+          signal: AbortSignal.timeout(10_000),
+        });
+
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          const msg = `Kuma push failed (HTTP ${res.status}): ${body}`;
+          if (json) jsonOut({ ok: false, error: msg });
+          console.error(chalk.red(`❌ ${msg}`));
+          process.exit(EXIT_CODES.GENERAL);
+        }
+
+        if (json) {
+          jsonOut({ pushToken, status: statusKey, msg: opts.msg ?? null });
+        }
+
+        success(`Push heartbeat sent (${statusKey}${opts.msg ? ` — ${opts.msg}` : ""})`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (json) jsonOut({ ok: false, error: msg });
+        console.error(chalk.red(`❌ ${msg}`));
+        process.exit(EXIT_CODES.CONNECTION);
       }
     });
 }
