@@ -139,7 +139,7 @@ ${chalk.dim("Examples:")}
       }
 
       try {
-        execSync("npm install -g github:BlackAsteroid/kuma-cli", {
+        execSync("npm install -g @blackasteroid/kuma-cli@latest", {
           stdio: json ? "pipe" : "inherit",
         });
       } catch (err: unknown) {

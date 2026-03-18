@@ -8883,6 +8883,121 @@ var require_browser = __commonJS({
   }
 });
 
+// node_modules/has-flag/index.js
+var require_has_flag = __commonJS({
+  "node_modules/has-flag/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (flag, argv = process.argv) => {
+      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+      const position = argv.indexOf(prefix + flag);
+      const terminatorPosition = argv.indexOf("--");
+      return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+    };
+  }
+});
+
+// node_modules/supports-color/index.js
+var require_supports_color = __commonJS({
+  "node_modules/supports-color/index.js"(exports2, module2) {
+    "use strict";
+    var os3 = require("os");
+    var tty2 = require("tty");
+    var hasFlag2 = require_has_flag();
+    var { env: env3 } = process;
+    var forceColor;
+    if (hasFlag2("no-color") || hasFlag2("no-colors") || hasFlag2("color=false") || hasFlag2("color=never")) {
+      forceColor = 0;
+    } else if (hasFlag2("color") || hasFlag2("colors") || hasFlag2("color=true") || hasFlag2("color=always")) {
+      forceColor = 1;
+    }
+    if ("FORCE_COLOR" in env3) {
+      if (env3.FORCE_COLOR === "true") {
+        forceColor = 1;
+      } else if (env3.FORCE_COLOR === "false") {
+        forceColor = 0;
+      } else {
+        forceColor = env3.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env3.FORCE_COLOR, 10), 3);
+      }
+    }
+    function translateLevel2(level) {
+      if (level === 0) {
+        return false;
+      }
+      return {
+        level,
+        hasBasic: true,
+        has256: level >= 2,
+        has16m: level >= 3
+      };
+    }
+    function supportsColor2(haveStream, streamIsTTY) {
+      if (forceColor === 0) {
+        return 0;
+      }
+      if (hasFlag2("color=16m") || hasFlag2("color=full") || hasFlag2("color=truecolor")) {
+        return 3;
+      }
+      if (hasFlag2("color=256")) {
+        return 2;
+      }
+      if (haveStream && !streamIsTTY && forceColor === void 0) {
+        return 0;
+      }
+      const min = forceColor || 0;
+      if (env3.TERM === "dumb") {
+        return min;
+      }
+      if (process.platform === "win32") {
+        const osRelease = os3.release().split(".");
+        if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+          return Number(osRelease[2]) >= 14931 ? 3 : 2;
+        }
+        return 1;
+      }
+      if ("CI" in env3) {
+        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => sign in env3) || env3.CI_NAME === "codeship") {
+          return 1;
+        }
+        return min;
+      }
+      if ("TEAMCITY_VERSION" in env3) {
+        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env3.TEAMCITY_VERSION) ? 1 : 0;
+      }
+      if (env3.COLORTERM === "truecolor") {
+        return 3;
+      }
+      if ("TERM_PROGRAM" in env3) {
+        const version = parseInt((env3.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+        switch (env3.TERM_PROGRAM) {
+          case "iTerm.app":
+            return version >= 3 ? 3 : 2;
+          case "Apple_Terminal":
+            return 2;
+        }
+      }
+      if (/-256(color)?$/i.test(env3.TERM)) {
+        return 2;
+      }
+      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env3.TERM)) {
+        return 1;
+      }
+      if ("COLORTERM" in env3) {
+        return 1;
+      }
+      return min;
+    }
+    function getSupportLevel(stream) {
+      const level = supportsColor2(stream, stream && stream.isTTY);
+      return translateLevel2(level);
+    }
+    module2.exports = {
+      supportsColor: getSupportLevel,
+      stdout: translateLevel2(supportsColor2(true, tty2.isatty(1))),
+      stderr: translateLevel2(supportsColor2(true, tty2.isatty(2)))
+    };
+  }
+});
+
 // node_modules/debug/src/node.js
 var require_node = __commonJS({
   "node_modules/debug/src/node.js"(exports2, module2) {
@@ -8902,7 +9017,7 @@ var require_node = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor2 = require("supports-color");
+      const supportsColor2 = require_supports_color();
       if (supportsColor2 && (supportsColor2.stderr || supportsColor2).level >= 2) {
         exports2.colors = [
           20,
@@ -22681,7 +22796,7 @@ var require_styles2 = __commonJS({
 });
 
 // node_modules/@colors/colors/lib/system/has-flag.js
-var require_has_flag = __commonJS({
+var require_has_flag2 = __commonJS({
   "node_modules/@colors/colors/lib/system/has-flag.js"(exports2, module2) {
     "use strict";
     module2.exports = function(flag, argv) {
@@ -22699,7 +22814,7 @@ var require_supports_colors = __commonJS({
   "node_modules/@colors/colors/lib/system/supports-colors.js"(exports2, module2) {
     "use strict";
     var os3 = require("os");
-    var hasFlag2 = require_has_flag();
+    var hasFlag2 = require_has_flag2();
     var env3 = process.env;
     var forceColor = void 0;
     if (hasFlag2("no-color") || hasFlag2("no-colors") || hasFlag2("color=false")) {
@@ -27575,10 +27690,12 @@ Object.assign(lookup, {
 // src/client.ts
 var KumaClient = class {
   constructor(url2) {
-    // Kuma pushes heartbeatList and uptime events immediately on connect (before
-    // getMonitorList is called), so we buffer them for later use.
+    // Kuma pushes heartbeatList, uptime, and statusPageList events immediately
+    // on connect / after auth, so we buffer them for later use.
     this.heartbeatCache = {};
     this.uptimeCache = {};
+    // BUG-02 fix: buffer statusPageList pushed by Kuma during afterLogin
+    this.statusPageCache = null;
     this.url = url2;
     this.socket = lookup(url2, {
       transports: ["websocket"],
@@ -27599,6 +27716,9 @@ var KumaClient = class {
         this.uptimeCache[`${monitorId}_${period}`] = value2;
       }
     );
+    this.socket.on("statusPageList", (data) => {
+      this.statusPageCache = data;
+    });
   }
   /**
    * Wait for a server-pushed event (not a callback response).
@@ -27796,14 +27916,52 @@ var KumaClient = class {
       );
     });
   }
-  async getHeartbeatList(monitorId, period) {
-    this.socket.emit("getHeartbeatList", monitorId, period ?? 24);
-    const result = await this.waitFor("heartbeatList");
-    return result.data ?? [];
+  // BUG-01 fix: use the correct server event "getMonitorBeats" with a callback.
+  // The old code emitted "getHeartbeatList" (which doesn't exist) and tried to
+  // waitFor a "heartbeatList" push event — causing a timeout every time.
+  // The correct API: socket.emit("getMonitorBeats", monitorID, periodHours, cb)
+  // cb receives { ok: boolean, data: Heartbeat[] }
+  async getHeartbeatList(monitorId, periodHours = 24) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("getMonitorBeats timeout")),
+        15e3
+      );
+      this.socket.emit(
+        "getMonitorBeats",
+        monitorId,
+        periodHours,
+        (result) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Failed to fetch heartbeats"));
+            return;
+          }
+          resolve(result.data ?? []);
+        }
+      );
+    });
   }
+  // BUG-02 fix: statusPageList is pushed by Kuma automatically during afterLogin,
+  // not as a response to any explicit emit. The old code registered a waitFor
+  // listener *after* the push had already fired, causing a guaranteed timeout.
+  // Fix: buffer the push in the constructor and return the cache here.
+  // If the cache is still null after auth (e.g. no status pages exist), fall back
+  // to a short waitFor so we don't hang forever.
   async getStatusPageList() {
-    this.socket.emit("getStatusPageList");
-    return this.waitFor("statusPageList");
+    if (this.statusPageCache !== null) {
+      return this.statusPageCache;
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        resolve({});
+      }, 5e3);
+      this.socket.once("statusPageList", (data) => {
+        clearTimeout(timer);
+        this.statusPageCache = data;
+        resolve(data);
+      });
+    });
   }
   disconnect() {
     this.socket.disconnect();
@@ -30621,7 +30779,7 @@ ${source_default.bold(`Upgrading kuma-cli`)} ${source_default.dim(`v${current}`)
       );
     }
     try {
-      (0, import_child_process.execSync)("npm install -g github:BlackAsteroid/kuma-cli", {
+      (0, import_child_process.execSync)("npm install -g @blackasteroid/kuma-cli@latest", {
         stdio: json ? "pipe" : "inherit"
       });
     } catch (err) {
