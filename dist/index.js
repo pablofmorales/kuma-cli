@@ -27575,12 +27575,30 @@ Object.assign(lookup, {
 // src/client.ts
 var KumaClient = class {
   constructor(url2) {
+    // Kuma pushes heartbeatList and uptime events immediately on connect (before
+    // getMonitorList is called), so we buffer them for later use.
+    this.heartbeatCache = {};
+    this.uptimeCache = {};
     this.url = url2;
     this.socket = lookup(url2, {
       transports: ["websocket"],
       reconnection: false,
       timeout: 1e4
     });
+    this.socket.on(
+      "heartbeatList",
+      (monitorId, data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          this.heartbeatCache[monitorId] = data[data.length - 1];
+        }
+      }
+    );
+    this.socket.on(
+      "uptime",
+      (monitorId, period, value2) => {
+        this.uptimeCache[`${monitorId}_${period}`] = value2;
+      }
+    );
   }
   /**
    * Wait for a server-pushed event (not a callback response).
@@ -27643,47 +27661,23 @@ var KumaClient = class {
     });
   }
   async getMonitorList() {
-    return new Promise((resolve) => {
-      const monitors = {};
-      const heartbeats = {};
-      const uptimes = {};
-      const mergeAndResolve = () => {
-        this.socket.off("heartbeatList");
-        this.socket.off("uptime");
-        for (const [idStr, monitor] of Object.entries(monitors)) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("getMonitorList timeout")),
+        1e4
+      );
+      this.socket.once("monitorList", (data) => {
+        clearTimeout(timer);
+        for (const [idStr, monitor] of Object.entries(data)) {
           const id = Number(idStr);
-          const hb = heartbeats[id];
+          const hb = this.heartbeatCache[id];
           if (hb) monitor.heartbeat = hb;
-          const up24 = uptimes[`${id}_24`];
+          const up24 = this.uptimeCache[`${id}_24`];
           if (up24 !== void 0) monitor.uptime = up24;
         }
-        resolve(monitors);
-      };
-      const safetyTimer = setTimeout(() => mergeAndResolve(), 5e3);
-      this.socket.on(
-        "heartbeatList",
-        (monitorId, data) => {
-          if (Array.isArray(data) && data.length > 0) {
-            heartbeats[monitorId] = data[data.length - 1];
-          }
-        }
-      );
-      this.socket.on(
-        "uptime",
-        (monitorId, period, value2) => {
-          uptimes[`${monitorId}_${period}`] = value2;
-        }
-      );
-      this.socket.once(
-        "monitorList",
-        (data) => {
-          Object.assign(monitors, data);
-          clearTimeout(safetyTimer);
-          setTimeout(() => mergeAndResolve(), 1500);
-        }
-      );
-      this.socket.emit("getMonitorList", () => {
+        resolve(data);
       });
+      this.socket.emit("getMonitorList");
     });
   }
   // BUG-01 fix: addMonitor uses callback, not a separate event
