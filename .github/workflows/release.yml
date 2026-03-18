@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+# Only one release job at a time; cancel if a newer push lands while running
+concurrency:
+  group: release
+  cancel-in-progress: false   # don't cancel mid-release — let it finish
+
+permissions:
+  contents: write        # create tags + GitHub Release
+  issues: write          # comment on issues when fixed by a release
+  pull-requests: write   # comment on PRs when included in a release
+  id-token: write        # npm provenance (optional but good practice)
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history so semantic-release can walk all commits
+          fetch-depth: 0
+          # Use GH_PAT so the release commit triggers CI on main again
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npx semantic-release
