@@ -320,4 +320,133 @@ export function monitorsCommand(program: Command): void {
         handleError(err);
       }
     });
+
+  // DOWN — shortcut for monitors with status 0 (DOWN)
+  monitors
+    .command("down")
+    .description("Show only monitors that are currently DOWN")
+    .option("--json", "Output raw JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const config = getConfig();
+      if (!config) requireAuth();
+
+      try {
+        const client = await createAuthenticatedClient(
+          config!.url,
+          config!.token
+        );
+        const monitorMap = await client.getMonitorList();
+        client.disconnect();
+
+        const list = Object.values(monitorMap).filter(
+          (m: Monitor) => m.heartbeat?.status === 0
+        );
+
+        if (opts.json) {
+          console.log(JSON.stringify(list, null, 2));
+          return;
+        }
+
+        if (list.length === 0) {
+          console.log("✅ All monitors are UP");
+          return;
+        }
+
+        const table = createTable([
+          "ID",
+          "Name",
+          "Type",
+          "URL / Host",
+          "Status",
+          "Uptime 24h",
+          "Ping",
+        ]);
+
+        list.forEach((m: Monitor) => {
+          const target =
+            m.url ?? (m.hostname ? `${m.hostname}:${m.port}` : "—");
+          table.push([
+            String(m.id),
+            m.name,
+            m.type,
+            target,
+            statusLabel(0),
+            formatUptime(m.uptime),
+            formatPing(m.heartbeat?.ping),
+          ]);
+        });
+
+        console.log(table.toString());
+        console.log(`\n${list.length} monitor(s) DOWN`);
+      } catch (err) {
+        handleError(err);
+      }
+    });
+}
+
+/**
+ * Register `kuma down` as a top-level alias for `kuma monitors down`.
+ * Called from src/index.ts after monitorsCommand().
+ */
+export function downAliasCommand(program: Command): void {
+  program
+    .command("down")
+    .description("Show only monitors that are currently DOWN (alias for: monitors down)")
+    .option("--json", "Output raw JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const config = getConfig();
+      if (!config) requireAuth();
+
+      try {
+        const client = await createAuthenticatedClient(
+          config!.url,
+          config!.token
+        );
+        const monitorMap = await client.getMonitorList();
+        client.disconnect();
+
+        const list = Object.values(monitorMap).filter(
+          (m: Monitor) => m.heartbeat?.status === 0
+        );
+
+        if (opts.json) {
+          console.log(JSON.stringify(list, null, 2));
+          return;
+        }
+
+        if (list.length === 0) {
+          console.log("✅ All monitors are UP");
+          return;
+        }
+
+        const table = createTable([
+          "ID",
+          "Name",
+          "Type",
+          "URL / Host",
+          "Status",
+          "Uptime 24h",
+          "Ping",
+        ]);
+
+        list.forEach((m: Monitor) => {
+          const target =
+            m.url ?? (m.hostname ? `${m.hostname}:${m.port}` : "—");
+          table.push([
+            String(m.id),
+            m.name,
+            m.type,
+            target,
+            statusLabel(0),
+            formatUptime(m.uptime),
+            formatPing(m.heartbeat?.ping),
+          ]);
+        });
+
+        console.log(table.toString());
+        console.log(`\n${list.length} monitor(s) DOWN`);
+      } catch (err) {
+        handleError(err);
+      }
+    });
 }

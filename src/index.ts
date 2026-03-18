@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
-import { monitorsCommand } from "./commands/monitors.js";
+import { monitorsCommand, downAliasCommand } from "./commands/monitors.js";
 import { heartbeatCommand } from "./commands/heartbeat.js";
 import { statusPagesCommand } from "./commands/status-pages.js";
 import { getConfig, getConfigPath } from "./config.js";
@@ -51,5 +51,6 @@ logoutCommand(program);
 monitorsCommand(program);
 heartbeatCommand(program);
 statusPagesCommand(program);
+downAliasCommand(program); // `kuma down` → shortcut for `kuma monitors down`
 
 program.parse(process.argv);
