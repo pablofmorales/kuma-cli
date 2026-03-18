@@ -55,6 +55,10 @@ export class KumaClient {
     });
   }
 
+  /**
+   * Wait for a server-pushed event (not a callback response).
+   * Used for events the server pushes after authentication (monitorList, etc.).
+   */
   private waitFor<T>(event: string, timeoutMs = 10000): Promise<T> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -86,20 +90,36 @@ export class KumaClient {
     });
   }
 
+  // BUG-01 fix: use Socket.IO acknowledgement callbacks instead of waitFor()
   async login(username: string, password: string): Promise<LoginResult> {
-    this.socket.emit("login", { username, password });
-    const result = await this.waitFor<{
-      ok: boolean;
-      token?: string;
-      msg?: string;
-    }>("loginResult");
-    return result;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Login timeout")),
+        10000
+      );
+      this.socket.emit(
+        "login",
+        { username, password },
+        (result: LoginResult) => {
+          clearTimeout(timer);
+          resolve(result);
+        }
+      );
+    });
   }
 
+  // BUG-01 fix: loginByToken also uses callback pattern
   async loginByToken(token: string): Promise<boolean> {
-    this.socket.emit("loginByToken", token);
-    const result = await this.waitFor<{ ok: boolean }>("loginResult");
-    return result.ok;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Login timeout")),
+        10000
+      );
+      this.socket.emit("loginByToken", token, (result: { ok: boolean }) => {
+        clearTimeout(timer);
+        resolve(result.ok);
+      });
+    });
   }
 
   async getMonitorList(): Promise<Record<string, Monitor>> {
@@ -107,31 +127,126 @@ export class KumaClient {
     return this.waitFor<Record<string, Monitor>>("monitorList");
   }
 
+  // BUG-01 fix: addMonitor uses callback, not a separate event
+  // BUG-03 fix: include required fields accepted_statuscodes, maxretries, retryInterval
   async addMonitor(monitor: Partial<Monitor>): Promise<{ id: number }> {
-    this.socket.emit("add", monitor);
-    return this.waitFor<{ monitorID: number }>("monitorID").then((r) => ({
-      id: r.monitorID,
-    }));
+    const payload = {
+      accepted_statuscodes: ["200-299"],
+      maxretries: 1,
+      retryInterval: 60,
+      ...monitor,
+    };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Add monitor timeout")),
+        10000
+      );
+      this.socket.emit(
+        "add",
+        payload,
+        (result: { ok: boolean; monitorID?: number; msg?: string }) => {
+          clearTimeout(timer);
+          // BUG-04 pattern: check result.ok
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Failed to add monitor"));
+            return;
+          }
+          resolve({ id: result.monitorID! });
+        }
+      );
+    });
   }
 
+  // BUG-01 fix: editMonitor uses callback pattern (consistent with all other mutations)
+  // BUG-04 fix: check result.ok and throw on failure
   async editMonitor(id: number, monitor: Partial<Monitor>): Promise<void> {
-    this.socket.emit("editMonitor", { ...monitor, id });
-    await this.waitFor("editMonitorResult");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Edit monitor timeout")),
+        10000
+      );
+      this.socket.emit(
+        "editMonitor",
+        { ...monitor, id },
+        (result: { ok: boolean; msg?: string }) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Operation failed"));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
   }
 
+  // BUG-01 fix: deleteMonitor uses callback
+  // BUG-04 fix: check result.ok and throw on failure
   async deleteMonitor(id: number): Promise<void> {
-    this.socket.emit("deleteMonitor", id);
-    await this.waitFor("deleteMonitorResult");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Delete monitor timeout")),
+        10000
+      );
+      this.socket.emit(
+        "deleteMonitor",
+        id,
+        (result: { ok: boolean; msg?: string }) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Operation failed"));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
   }
 
+  // BUG-01 fix: pauseMonitor uses callback
+  // BUG-04 fix: check result.ok and throw on failure
   async pauseMonitor(id: number): Promise<void> {
-    this.socket.emit("pauseMonitor", id);
-    await this.waitFor("pauseMonitorResult");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Pause monitor timeout")),
+        10000
+      );
+      this.socket.emit(
+        "pauseMonitor",
+        id,
+        (result: { ok: boolean; msg?: string }) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Operation failed"));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
   }
 
+  // BUG-01 fix: resumeMonitor uses callback
+  // BUG-04 fix: check result.ok and throw on failure
   async resumeMonitor(id: number): Promise<void> {
-    this.socket.emit("resumeMonitor", id);
-    await this.waitFor("resumeMonitorResult");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Resume monitor timeout")),
+        10000
+      );
+      this.socket.emit(
+        "resumeMonitor",
+        id,
+        (result: { ok: boolean; msg?: string }) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Operation failed"));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
   }
 
   async getHeartbeatList(

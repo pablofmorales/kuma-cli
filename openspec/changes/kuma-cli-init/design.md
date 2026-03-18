@@ -81,8 +81,8 @@ kuma-cli/
 - Emits `getStatusPageList`
 - Renders table: ID | Name | Slug | URL
 
-#### `kuma heartbeat <slug>`
-- Emits `getHeartbeatList` for the given monitor slug
+#### `kuma heartbeat <monitor-id>`
+- Emits `getHeartbeatList` for the given monitor ID (integer, not slug — Kuma API uses integer IDs)
 - Renders last 20 heartbeats: Time | Status | Latency | Message
 
 ## Error Handling
