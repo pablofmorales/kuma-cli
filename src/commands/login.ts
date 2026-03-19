@@ -34,6 +34,21 @@ ${chalk.dim("Notes:")}
         // Normalize URL
         const normalizedUrl = url.replace(/\/$/, "");
 
+        // Fix #2: Warn when connecting over plain HTTP — credentials will be in cleartext
+        if (!normalizedUrl.startsWith("https://")) {
+          if (json) {
+            // In JSON mode, surface as a warning but don't block — caller decides
+            console.log(JSON.stringify({
+              warning: "Connecting over HTTP. Credentials will be transmitted in cleartext. Use HTTPS in production."
+            }));
+          } else {
+            console.warn(chalk.yellow(
+              "⚠️  Warning: connecting over HTTP. Your credentials will be sent in cleartext.\n" +
+              "   Use https:// in production environments."
+            ));
+          }
+        }
+
         const answers = await prompt([
           {
             type: "input",

@@ -5,6 +5,44 @@ import { getConfig } from "../config.js";
 import { createTable, isJsonMode, jsonOut, success, error } from "../utils/output.js";
 import { handleError, requireAuth } from "../utils/errors.js";
 
+/**
+ * Security fix #1: Resolve a flag value from the environment if it looks like an env var.
+ * Supports two safe patterns:
+ *   - "$VAR_NAME" → reads process.env.VAR_NAME
+ *   - "-"         → reads from stdin (first line)
+ *
+ * This prevents webhook URLs and tokens from appearing in shell history, ps aux output,
+ * and CI/CD logs. Users should pass secrets via env vars:
+ *   DISCORD_WEBHOOK=https://... kuma notifications create --type discord --discord-webhook '$DISCORD_WEBHOOK'
+ */
+function resolveSecret(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+
+  // $VAR_NAME — read from environment
+  if (value.startsWith("$")) {
+    const varName = value.slice(1);
+    const resolved = process.env[varName];
+    if (!resolved) {
+      // Don't throw here — let the per-type validation handle "missing required field"
+      return undefined;
+    }
+    return resolved;
+  }
+
+  // "-" — read from stdin (blocks until newline)
+  if (value === "-") {
+    try {
+      const buf = Buffer.alloc(4096);
+      const n = require("fs").readSync(0, buf, 0, buf.length, null);
+      return buf.toString("utf8", 0, n).trim();
+    } catch {
+      return undefined;
+    }
+  }
+
+  return value;
+}
+
 export function notificationsCommand(program: Command): void {
   const notifications = program
     .command("notifications")
@@ -96,15 +134,15 @@ ${chalk.dim("Examples:")}
     .requiredOption("--type <type>", "Notification type: discord, telegram, slack, webhook, ...")
     .requiredOption("--name <name>", "Friendly name for this notification channel")
     // Discord
-    .option("--discord-webhook <url>", "Discord webhook URL (required for --type discord)")
+    .option("--discord-webhook <url|$VAR>", "Discord webhook URL — pass value or env var name like '$DISCORD_WEBHOOK'")
     .option("--discord-username <name>", "Discord bot display name (optional)")
     // Telegram
-    .option("--telegram-token <token>", "Telegram bot token (required for --type telegram)")
+    .option("--telegram-token <token|$VAR>", "Telegram bot token — pass value or env var name like '$TELEGRAM_TOKEN'")
     .option("--telegram-chat-id <id>", "Telegram chat ID (required for --type telegram)")
     // Slack
-    .option("--slack-webhook <url>", "Slack webhook URL (required for --type slack)")
+    .option("--slack-webhook <url|$VAR>", "Slack webhook URL — pass value or env var name like '$SLACK_WEBHOOK'")
     // Generic webhook
-    .option("--webhook-url <url>", "Webhook URL (required for --type webhook)")
+    .option("--webhook-url <url|$VAR>", "Webhook URL — pass value or env var name like '$WEBHOOK_URL'")
     .option("--webhook-content-type <type>", "Webhook content type (default: application/json)", "application/json")
     // Common flags
     .option("--default", "Enable this notification by default on all new monitors")
@@ -114,10 +152,14 @@ ${chalk.dim("Examples:")}
       "after",
       `
 ${chalk.dim("Examples:")}
-  ${chalk.cyan("kuma notifications create --type discord --name \"Alerts\" --discord-webhook https://discord.com/api/webhooks/...")}
-  ${chalk.cyan("kuma notifications create --type telegram --name \"TG\" --telegram-token 123:ABC --telegram-chat-id -100...")}
-  ${chalk.cyan("kuma notifications create --type webhook --name \"My Hook\" --webhook-url https://example.com/hook")}
-  ${chalk.cyan("kuma notifications create --type discord --name \"Default\" --discord-webhook $URL --default --apply-existing")}
+  ${chalk.cyan("kuma notifications create --type discord --name \"Alerts\" --discord-webhook '$DISCORD_WEBHOOK'")}
+  ${chalk.cyan("kuma notifications create --type telegram --name \"TG\" --telegram-token '$TELEGRAM_TOKEN' --telegram-chat-id -100...")}
+  ${chalk.cyan("kuma notifications create --type webhook --name \"My Hook\" --webhook-url '$WEBHOOK_URL'")}
+  ${chalk.cyan("kuma notifications create --type discord --name \"Default\" --discord-webhook '$DISCORD_WEBHOOK' --default --apply-existing")}
+
+${chalk.dim("⚠️  Security: never pass secrets as literal flag values — use env vars:")}
+  ${chalk.cyan("export DISCORD_WEBHOOK=https://discord.com/api/webhooks/...")}
+  ${chalk.cyan("kuma notifications create --type discord --name \"Alerts\" --discord-webhook '\\$DISCORD_WEBHOOK'")}
 
 ${chalk.dim("Supported types:")}
   discord, telegram, slack, webhook, gotify, ntfy, pushover, matrix, mattermost, teams ...
@@ -153,35 +195,41 @@ ${chalk.dim("Supported types:")}
       };
 
       // Attach provider-specific fields
+      // Fix #1: resolve env var references for all secret/credential flags
+      const discordWebhook = resolveSecret(opts.discordWebhook);
+      const telegramToken = resolveSecret(opts.telegramToken);
+      const slackWebhook = resolveSecret(opts.slackWebhook);
+      const webhookUrl = resolveSecret(opts.webhookUrl);
+
       switch (opts.type.toLowerCase()) {
         case "discord":
-          if (!opts.discordWebhook) {
-            handleError(new Error("--discord-webhook is required for --type discord"), opts);
+          if (!discordWebhook) {
+            handleError(new Error("--discord-webhook is required for --type discord (pass value or '$ENV_VAR_NAME')"), opts);
           }
-          payload.discordWebhookUrl = opts.discordWebhook;
+          payload.discordWebhookUrl = discordWebhook;
           if (opts.discordUsername) payload.discordUsername = opts.discordUsername;
           break;
 
         case "telegram":
-          if (!opts.telegramToken || !opts.telegramChatId) {
+          if (!telegramToken || !opts.telegramChatId) {
             handleError(new Error("--telegram-token and --telegram-chat-id are required for --type telegram"), opts);
           }
-          payload.telegramBotToken = opts.telegramToken;
+          payload.telegramBotToken = telegramToken;
           payload.telegramChatID = opts.telegramChatId;
           break;
 
         case "slack":
-          if (!opts.slackWebhook) {
-            handleError(new Error("--slack-webhook is required for --type slack"), opts);
+          if (!slackWebhook) {
+            handleError(new Error("--slack-webhook is required for --type slack (pass value or '$ENV_VAR_NAME')"), opts);
           }
-          payload.slackwebhookURL = opts.slackWebhook;
+          payload.slackwebhookURL = slackWebhook;
           break;
 
         case "webhook":
-          if (!opts.webhookUrl) {
-            handleError(new Error("--webhook-url is required for --type webhook"), opts);
+          if (!webhookUrl) {
+            handleError(new Error("--webhook-url is required for --type webhook (pass value or '$ENV_VAR_NAME')"), opts);
           }
-          payload.webhookURL = opts.webhookUrl;
+          payload.webhookURL = webhookUrl;
           payload.webhookContentType = opts.webhookContentType ?? "application/json";
           break;
 
@@ -233,8 +281,8 @@ ${chalk.dim("Examples:")}
       const json = isJsonMode(opts);
       const notifId = parseInt(id, 10);
 
-      if (isNaN(notifId)) {
-        handleError(new Error(`Invalid notification ID: ${id}`), opts);
+      if (isNaN(notifId) || notifId <= 0) {
+        handleError(new Error(`Invalid notification ID: "${id}". Must be a positive integer.`), opts);
       }
 
       if (!opts.force && !json) {

@@ -51,9 +51,14 @@ ${chalk.dim("Examples:")}
 
       const json = isJsonMode(opts);
 
+      const parsedMonitorId = parseInt(monitorId, 10);
+      if (isNaN(parsedMonitorId) || parsedMonitorId <= 0) {
+        handleError(new Error(`Invalid monitor ID: "${monitorId}". Must be a positive integer.`), opts);
+      }
+
       try {
         const client = await createAuthenticatedClient(config!.url, config!.token);
-        const heartbeats = await client.getHeartbeatList(parseInt(monitorId, 10));
+        const heartbeats = await client.getHeartbeatList(parsedMonitorId);
         client.disconnect();
 
         const limit = parseInt(opts.limit ?? "20", 10);
@@ -124,6 +129,15 @@ ${chalk.dim("Finding your push token:")}
       json?: boolean;
     }) => {
       const json = isJsonMode(opts);
+
+      // Fix #3: Validate pushToken to prevent path traversal / URL injection.
+      // Kuma generates tokens as hex strings; reject anything else.
+      if (!/^[a-zA-Z0-9_-]+$/.test(pushToken)) {
+        const msg = `Invalid push token format. Tokens must contain only alphanumeric characters, hyphens, and underscores.`;
+        if (json) jsonError(msg, EXIT_CODES.GENERAL);
+        console.error(chalk.red(`❌ ${msg}`));
+        process.exit(EXIT_CODES.GENERAL);
+      }
 
       // Validate status before doing any network call
       const VALID_STATUSES = ["up", "down", "maintenance"];

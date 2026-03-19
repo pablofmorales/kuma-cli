@@ -30366,6 +30366,17 @@ ${source_default.dim("Notes:")}
     const json = isJsonMode(opts);
     try {
       const normalizedUrl = url2.replace(/\/$/, "");
+      if (!normalizedUrl.startsWith("https://")) {
+        if (json) {
+          console.log(JSON.stringify({
+            warning: "Connecting over HTTP. Credentials will be transmitted in cleartext. Use HTTPS in production."
+          }));
+        } else {
+          console.warn(source_default.yellow(
+            "\u26A0\uFE0F  Warning: connecting over HTTP. Your credentials will be sent in cleartext.\n   Use https:// in production environments."
+          ));
+        }
+      }
       const answers = await prompt([
         {
           type: "input",
@@ -31067,9 +31078,13 @@ ${source_default.dim("Examples:")}
     const config = getConfig();
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
+    const parsedMonitorId = parseInt(monitorId, 10);
+    if (isNaN(parsedMonitorId) || parsedMonitorId <= 0) {
+      handleError(new Error(`Invalid monitor ID: "${monitorId}". Must be a positive integer.`), opts);
+    }
     try {
       const client = await createAuthenticatedClient(config.url, config.token);
-      const heartbeats = await client.getHeartbeatList(parseInt(monitorId, 10));
+      const heartbeats = await client.getHeartbeatList(parsedMonitorId);
       client.disconnect();
       const limit = parseInt(opts.limit ?? "20", 10);
       const recent = heartbeats.slice(-limit).reverse();
@@ -31119,6 +31134,12 @@ ${source_default.dim("Finding your push token:")}
 `
   ).action(async (pushToken, opts) => {
     const json = isJsonMode(opts);
+    if (!/^[a-zA-Z0-9_-]+$/.test(pushToken)) {
+      const msg = `Invalid push token format. Tokens must contain only alphanumeric characters, hyphens, and underscores.`;
+      if (json) jsonError(msg, EXIT_CODES.GENERAL);
+      console.error(source_default.red(`\u274C ${msg}`));
+      process.exit(EXIT_CODES.GENERAL);
+    }
     const VALID_STATUSES = ["up", "down", "maintenance"];
     const statusKey = (opts.status ?? "up").toLowerCase();
     if (!VALID_STATUSES.includes(statusKey)) {
@@ -31324,7 +31345,7 @@ ${source_default.bold(`Upgrading kuma-cli`)} ${source_default.dim(`v${current}`)
       );
     }
     try {
-      (0, import_child_process.execSync)("npm install -g @blackasteroid/kuma-cli@latest", {
+      (0, import_child_process.execSync)(`npm install -g @blackasteroid/kuma-cli@${latest}`, {
         stdio: json ? "pipe" : "inherit"
       });
     } catch (err) {
@@ -31357,6 +31378,27 @@ ${source_default.bold(`Upgrading kuma-cli`)} ${source_default.dim(`v${current}`)
 }
 
 // src/commands/notifications.ts
+function resolveSecret(value2) {
+  if (value2 === void 0) return void 0;
+  if (value2.startsWith("$")) {
+    const varName = value2.slice(1);
+    const resolved = process.env[varName];
+    if (!resolved) {
+      return void 0;
+    }
+    return resolved;
+  }
+  if (value2 === "-") {
+    try {
+      const buf = Buffer.alloc(4096);
+      const n = require("fs").readSync(0, buf, 0, buf.length, null);
+      return buf.toString("utf8", 0, n).trim();
+    } catch {
+      return void 0;
+    }
+  }
+  return value2;
+}
 function notificationsCommand(program3) {
   const notifications = program3.command("notifications").description("Manage notification channels (Discord, Telegram, webhook, ...)").addHelpText(
     "after",
@@ -31423,14 +31465,18 @@ ${list.length} notification channel(s)`);
       handleError(err, opts);
     }
   });
-  notifications.command("create").description("Create a new notification channel").requiredOption("--type <type>", "Notification type: discord, telegram, slack, webhook, ...").requiredOption("--name <name>", "Friendly name for this notification channel").option("--discord-webhook <url>", "Discord webhook URL (required for --type discord)").option("--discord-username <name>", "Discord bot display name (optional)").option("--telegram-token <token>", "Telegram bot token (required for --type telegram)").option("--telegram-chat-id <id>", "Telegram chat ID (required for --type telegram)").option("--slack-webhook <url>", "Slack webhook URL (required for --type slack)").option("--webhook-url <url>", "Webhook URL (required for --type webhook)").option("--webhook-content-type <type>", "Webhook content type (default: application/json)", "application/json").option("--default", "Enable this notification by default on all new monitors").option("--apply-existing", "Apply this notification to all existing monitors immediately").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  notifications.command("create").description("Create a new notification channel").requiredOption("--type <type>", "Notification type: discord, telegram, slack, webhook, ...").requiredOption("--name <name>", "Friendly name for this notification channel").option("--discord-webhook <url|$VAR>", "Discord webhook URL \u2014 pass value or env var name like '$DISCORD_WEBHOOK'").option("--discord-username <name>", "Discord bot display name (optional)").option("--telegram-token <token|$VAR>", "Telegram bot token \u2014 pass value or env var name like '$TELEGRAM_TOKEN'").option("--telegram-chat-id <id>", "Telegram chat ID (required for --type telegram)").option("--slack-webhook <url|$VAR>", "Slack webhook URL \u2014 pass value or env var name like '$SLACK_WEBHOOK'").option("--webhook-url <url|$VAR>", "Webhook URL \u2014 pass value or env var name like '$WEBHOOK_URL'").option("--webhook-content-type <type>", "Webhook content type (default: application/json)", "application/json").option("--default", "Enable this notification by default on all new monitors").option("--apply-existing", "Apply this notification to all existing monitors immediately").option("--json", "Output as JSON ({ ok, data })").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
-  ${source_default.cyan('kuma notifications create --type discord --name "Alerts" --discord-webhook https://discord.com/api/webhooks/...')}
-  ${source_default.cyan('kuma notifications create --type telegram --name "TG" --telegram-token 123:ABC --telegram-chat-id -100...')}
-  ${source_default.cyan('kuma notifications create --type webhook --name "My Hook" --webhook-url https://example.com/hook')}
-  ${source_default.cyan('kuma notifications create --type discord --name "Default" --discord-webhook $URL --default --apply-existing')}
+  ${source_default.cyan(`kuma notifications create --type discord --name "Alerts" --discord-webhook '$DISCORD_WEBHOOK'`)}
+  ${source_default.cyan(`kuma notifications create --type telegram --name "TG" --telegram-token '$TELEGRAM_TOKEN' --telegram-chat-id -100...`)}
+  ${source_default.cyan(`kuma notifications create --type webhook --name "My Hook" --webhook-url '$WEBHOOK_URL'`)}
+  ${source_default.cyan(`kuma notifications create --type discord --name "Default" --discord-webhook '$DISCORD_WEBHOOK' --default --apply-existing`)}
+
+${source_default.dim("\u26A0\uFE0F  Security: never pass secrets as literal flag values \u2014 use env vars:")}
+  ${source_default.cyan("export DISCORD_WEBHOOK=https://discord.com/api/webhooks/...")}
+  ${source_default.cyan(`kuma notifications create --type discord --name "Alerts" --discord-webhook '\\$DISCORD_WEBHOOK'`)}
 
 ${source_default.dim("Supported types:")}
   discord, telegram, slack, webhook, gotify, ntfy, pushover, matrix, mattermost, teams ...
@@ -31447,32 +31493,36 @@ ${source_default.dim("Supported types:")}
       active: true,
       applyExisting: opts.applyExisting ?? false
     };
+    const discordWebhook = resolveSecret(opts.discordWebhook);
+    const telegramToken = resolveSecret(opts.telegramToken);
+    const slackWebhook = resolveSecret(opts.slackWebhook);
+    const webhookUrl = resolveSecret(opts.webhookUrl);
     switch (opts.type.toLowerCase()) {
       case "discord":
-        if (!opts.discordWebhook) {
-          handleError(new Error("--discord-webhook is required for --type discord"), opts);
+        if (!discordWebhook) {
+          handleError(new Error("--discord-webhook is required for --type discord (pass value or '$ENV_VAR_NAME')"), opts);
         }
-        payload.discordWebhookUrl = opts.discordWebhook;
+        payload.discordWebhookUrl = discordWebhook;
         if (opts.discordUsername) payload.discordUsername = opts.discordUsername;
         break;
       case "telegram":
-        if (!opts.telegramToken || !opts.telegramChatId) {
+        if (!telegramToken || !opts.telegramChatId) {
           handleError(new Error("--telegram-token and --telegram-chat-id are required for --type telegram"), opts);
         }
-        payload.telegramBotToken = opts.telegramToken;
+        payload.telegramBotToken = telegramToken;
         payload.telegramChatID = opts.telegramChatId;
         break;
       case "slack":
-        if (!opts.slackWebhook) {
-          handleError(new Error("--slack-webhook is required for --type slack"), opts);
+        if (!slackWebhook) {
+          handleError(new Error("--slack-webhook is required for --type slack (pass value or '$ENV_VAR_NAME')"), opts);
         }
-        payload.slackwebhookURL = opts.slackWebhook;
+        payload.slackwebhookURL = slackWebhook;
         break;
       case "webhook":
-        if (!opts.webhookUrl) {
-          handleError(new Error("--webhook-url is required for --type webhook"), opts);
+        if (!webhookUrl) {
+          handleError(new Error("--webhook-url is required for --type webhook (pass value or '$ENV_VAR_NAME')"), opts);
         }
-        payload.webhookURL = opts.webhookUrl;
+        payload.webhookURL = webhookUrl;
         payload.webhookContentType = opts.webhookContentType ?? "application/json";
         break;
       default:
@@ -31508,8 +31558,8 @@ ${source_default.dim("Examples:")}
     if (!config) requireAuth(opts);
     const json = isJsonMode(opts);
     const notifId = parseInt(id, 10);
-    if (isNaN(notifId)) {
-      handleError(new Error(`Invalid notification ID: ${id}`), opts);
+    if (isNaN(notifId) || notifId <= 0) {
+      handleError(new Error(`Invalid notification ID: "${id}". Must be a positive integer.`), opts);
     }
     if (!opts.force && !json) {
       const enquirer3 = await Promise.resolve().then(() => __toESM(require_enquirer()));
