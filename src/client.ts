@@ -232,11 +232,25 @@ export class KumaClient {
 
   // BUG-01 fix: addMonitor uses callback, not a separate event
   // BUG-03 fix: include required fields accepted_statuscodes, maxretries, retryInterval
-  async addMonitor(monitor: Partial<Monitor>): Promise<{ id: number }> {
+  async addMonitor(monitor: Partial<Monitor> & { pushToken?: string }): Promise<{ id: number; pushToken?: string }> {
+    // Auto-generate a pushToken for push monitors if not provided.
+    // Kuma stores it on the monitor bean; without this it stays null.
+    const autoToken =
+      monitor.type === "push" && !monitor.pushToken
+        ? Array.from(crypto.getRandomValues(new Uint8Array(24)))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+        : undefined;
+
     const payload = {
       accepted_statuscodes: ["200-299"],
       maxretries: 1,
       retryInterval: 60,
+      conditions: [],
+      rabbitmqNodes: [],
+      kafkaProducerBrokers: [],
+      kafkaProducerSaslOptions: { mechanism: "none" },
+      ...(autoToken ? { pushToken: autoToken } : {}),
       ...monitor,
     };
     return new Promise((resolve, reject) => {
@@ -254,7 +268,11 @@ export class KumaClient {
             reject(new Error(result.msg ?? "Failed to add monitor"));
             return;
           }
-          resolve({ id: result.monitorID! });
+          resolve({
+            id: result.monitorID!,
+            // Return the token we generated so the caller has it immediately
+            pushToken: (payload as { pushToken?: string }).pushToken,
+          });
         }
       );
     });
@@ -408,6 +426,53 @@ export class KumaClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Tags
+  // ---------------------------------------------------------------------------
+
+  /** Get all tags defined in Kuma. Callback-based event. */
+  async getTags(): Promise<MonitorTag[]> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("getTags timeout")), 10000);
+      this.socket.emit(
+        "getTags",
+        (result: { ok: boolean; tags?: MonitorTag[]; msg?: string }) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Failed to fetch tags"));
+            return;
+          }
+          resolve(result.tags ?? []);
+        }
+      );
+    });
+  }
+
+  /**
+   * Add a tag to a monitor.
+   * socket.emit("addMonitorTag", tagID, monitorID, value, callback)
+   * value is a user-defined label string (can be empty "").
+   */
+  async addMonitorTag(tagId: number, monitorId: number, value = ""): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("addMonitorTag timeout")), 10000);
+      this.socket.emit(
+        "addMonitorTag",
+        tagId,
+        monitorId,
+        value,
+        (result: { ok: boolean; msg?: string }) => {
+          clearTimeout(timer);
+          if (!result.ok) {
+            reject(new Error(result.msg ?? "Failed to add tag to monitor"));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Notifications
   // ---------------------------------------------------------------------------
 
@@ -526,6 +591,52 @@ export class KumaClient {
         }
       );
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk operations
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Pause all monitors matching a filter function.
+   * Returns a list of { id, name, ok, error? } results.
+   */
+  async bulkPause(
+    filter: (m: Monitor) => boolean
+  ): Promise<Array<{ id: number; name: string; ok: boolean; error?: string }>> {
+    const monitorMap = await this.getMonitorList();
+    const targets = Object.values(monitorMap).filter(filter);
+    const results: Array<{ id: number; name: string; ok: boolean; error?: string }> = [];
+    for (const m of targets) {
+      try {
+        await this.pauseMonitor(m.id);
+        results.push({ id: m.id, name: m.name, ok: true });
+      } catch (e) {
+        results.push({ id: m.id, name: m.name, ok: false, error: (e as Error).message });
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Resume all monitors matching a filter function.
+   * Returns a list of { id, name, ok, error? } results.
+   */
+  async bulkResume(
+    filter: (m: Monitor) => boolean
+  ): Promise<Array<{ id: number; name: string; ok: boolean; error?: string }>> {
+    const monitorMap = await this.getMonitorList();
+    const targets = Object.values(monitorMap).filter(filter);
+    const results: Array<{ id: number; name: string; ok: boolean; error?: string }> = [];
+    for (const m of targets) {
+      try {
+        await this.resumeMonitor(m.id);
+        results.push({ id: m.id, name: m.name, ok: true });
+      } catch (e) {
+        results.push({ id: m.id, name: m.name, ok: false, error: (e as Error).message });
+      }
+    }
+    return results;
   }
 
   disconnect(): void {

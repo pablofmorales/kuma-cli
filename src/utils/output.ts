@@ -91,9 +91,9 @@ export function isJsonMode(opts?: { json?: boolean }): boolean {
  * Emit a successful JSON response to stdout and exit 0.
  * Shape: `{ "ok": true, "data": <payload> }`
  */
-export function jsonOut(data: unknown): never {
+export function jsonOut(data: unknown, exitCode = 0): never {
   console.log(JSON.stringify({ ok: true, data }, null, 2));
-  process.exit(0);
+  process.exit(exitCode);
 }
 
 /**
