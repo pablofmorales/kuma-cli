@@ -8,6 +8,7 @@ import {
   formatDate,
   isJsonMode,
   jsonOut,
+  jsonError,
   success,
 } from "../utils/output.js";
 import { handleError, requireAuth, EXIT_CODES } from "../utils/errors.js";
@@ -38,10 +39,10 @@ ${chalk.dim("Run")} ${chalk.cyan("kuma heartbeat <subcommand> --help")} ${chalk.
       "after",
       `
 ${chalk.dim("Examples:")}
-  ${chalk.cyan("kuma heartbeat view 42")}                  Last 20 heartbeats for monitor 42
-  ${chalk.cyan("kuma heartbeat view 42 --limit 50")}       Last 50 heartbeats
-  ${chalk.cyan("kuma heartbeat view 42 --json")}           Machine-readable output
-  ${chalk.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
+  ${chalk.cyan("kuma heartbeat view 42")}
+  ${chalk.cyan("kuma heartbeat view 42 --limit 50")}
+  ${chalk.cyan("kuma heartbeat view 42 --json")}
+  ${chalk.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}
 `
     )
     .action(async (monitorId: string, opts: { limit?: string; json?: boolean }) => {
@@ -104,12 +105,15 @@ ${chalk.dim("Examples:")}
 
 ${chalk.dim("GitHub Actions usage:")}
   ${chalk.cyan("- name: Heartbeat")}
-  ${chalk.cyan("  run: kuma heartbeat send \${{ secrets.RUNNER_PUSH_TOKEN }}")}
+  ${chalk.cyan("  if: always()")}
+  ${chalk.cyan("  run: kuma heartbeat send \${{ secrets.RUNNER_PUSH_TOKEN }} --status \${{ job.status == 'success' && 'up' || 'down' }}")}
 
 ${chalk.dim("Finding your push token:")}
-  Create a \"Push\" monitor in Kuma UI. The push URL looks like:
+  Create a "Push" monitor in Kuma UI. The push URL is:
   https://kuma.example.com/api/push/<token>
-  Use the <token> part as the argument.
+  Use only the <token> part.
+
+  Or get it from CLI: kuma monitors create --type push --name "my-runner" --json | jq '.data.pushToken'
 `
     )
     .action(async (pushToken: string, opts: {
@@ -121,26 +125,27 @@ ${chalk.dim("Finding your push token:")}
     }) => {
       const json = isJsonMode(opts);
 
+      // Validate status before doing any network call
+      const VALID_STATUSES = ["up", "down", "maintenance"];
+      const statusKey = (opts.status ?? "up").toLowerCase();
+      if (!VALID_STATUSES.includes(statusKey)) {
+        const msg = `Invalid status "${opts.status}". Valid: up, down, maintenance`;
+        if (json) jsonError(msg, EXIT_CODES.GENERAL);
+        console.error(chalk.red(`❌ ${msg}`));
+        process.exit(EXIT_CODES.GENERAL);
+      }
+
       // Determine base URL
       let baseUrl = opts.url;
       if (!baseUrl) {
         const config = getConfig();
         if (!config) {
-          const msg = "No --url specified and not logged in. Run: kuma login <url> or use --url";
-          if (json) jsonOut({ ok: false, error: msg });
+          const msg = "No --url specified and not logged in. Run: kuma login <url> or pass --url";
+          if (json) jsonError(msg, EXIT_CODES.AUTH);
           console.error(chalk.red(`❌ ${msg}`));
           process.exit(EXIT_CODES.AUTH);
         }
         baseUrl = config.url;
-      }
-
-      const STATUS_MAP: Record<string, string> = { up: "up", down: "down", maintenance: "maintenance" };
-      const statusKey = (opts.status ?? "up").toLowerCase();
-      if (!(statusKey in STATUS_MAP)) {
-        const msg = `Invalid status "${opts.status}". Valid: up, down, maintenance`;
-        if (json) jsonOut({ ok: false, error: msg });
-        console.error(chalk.red(`❌ ${msg}`));
-        process.exit(EXIT_CODES.GENERAL);
       }
 
       // Build the push URL
@@ -156,8 +161,19 @@ ${chalk.dim("Finding your push token:")}
 
         if (!res.ok) {
           const body = await res.text().catch(() => "");
-          const msg = `Kuma push failed (HTTP ${res.status}): ${body}`;
-          if (json) jsonOut({ ok: false, error: msg });
+          const msg = `Push failed (HTTP ${res.status}): ${body || res.statusText}`;
+          if (json) jsonError(msg, EXIT_CODES.GENERAL);
+          console.error(chalk.red(`❌ ${msg}`));
+          process.exit(EXIT_CODES.GENERAL);
+        }
+
+        // Kuma push endpoint returns { ok: boolean, msg?: string }
+        const data = await res.json().catch(() => ({ ok: true })) as { ok?: boolean; msg?: string };
+
+        if (data.ok === false) {
+          // Server returned ok:false inside a 200 response (e.g. invalid token)
+          const msg = data.msg ?? "Kuma rejected the push heartbeat";
+          if (json) jsonError(msg, EXIT_CODES.GENERAL);
           console.error(chalk.red(`❌ ${msg}`));
           process.exit(EXIT_CODES.GENERAL);
         }
@@ -169,7 +185,7 @@ ${chalk.dim("Finding your push token:")}
         success(`Push heartbeat sent (${statusKey}${opts.msg ? ` — ${opts.msg}` : ""})`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (json) jsonOut({ ok: false, error: msg });
+        if (json) jsonError(msg, EXIT_CODES.CONNECTION);
         console.error(chalk.red(`❌ ${msg}`));
         process.exit(EXIT_CODES.CONNECTION);
       }

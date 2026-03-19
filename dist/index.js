@@ -27808,6 +27808,7 @@ var KumaClient = class {
   // BUG-01 fix: addMonitor uses callback, not a separate event
   // BUG-03 fix: include required fields accepted_statuscodes, maxretries, retryInterval
   async addMonitor(monitor) {
+    const autoToken = monitor.type === "push" && !monitor.pushToken ? Array.from(crypto.getRandomValues(new Uint8Array(24))).map((b) => b.toString(16).padStart(2, "0")).join("") : void 0;
     const payload = {
       accepted_statuscodes: ["200-299"],
       maxretries: 1,
@@ -27816,6 +27817,7 @@ var KumaClient = class {
       rabbitmqNodes: [],
       kafkaProducerBrokers: [],
       kafkaProducerSaslOptions: { mechanism: "none" },
+      ...autoToken ? { pushToken: autoToken } : {},
       ...monitor
     };
     return new Promise((resolve, reject) => {
@@ -27832,7 +27834,11 @@ var KumaClient = class {
             reject(new Error(result.msg ?? "Failed to add monitor"));
             return;
           }
-          resolve({ id: result.monitorID });
+          resolve({
+            id: result.monitorID,
+            // Return the token we generated so the caller has it immediately
+            pushToken: payload.pushToken
+          });
         }
       );
     });
@@ -30291,9 +30297,9 @@ function isJsonMode(opts) {
   const env3 = process.env["KUMA_JSON"];
   return env3 === "1" || env3 === "true" || env3 === "yes";
 }
-function jsonOut(data) {
+function jsonOut(data, exitCode = 0) {
   console.log(JSON.stringify({ ok: true, data }, null, 2));
-  process.exit(0);
+  process.exit(exitCode);
 }
 function jsonError(message, code = 1) {
   console.log(JSON.stringify({ ok: false, error: message, code }, null, 2));
@@ -30606,18 +30612,19 @@ ${source_default.dim("Examples:")}
       }
     }
   );
-  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID to stdout").addHelpText(
+  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable \u2014 must already exist in Kuma)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID and pushToken to stdout").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
   ${source_default.cyan('kuma monitors create --type http --name "habitu.ar" --url https://habitu.ar')}
   ${source_default.cyan('kuma monitors create --type http --name "My API" --url https://api.example.com --tag Production --tag BlackAsteroid')}
-  ${source_default.cyan(`kuma monitors create --type push --name "GH Runner" --json | jq '.data.id'`)}
+  ${source_default.cyan(`kuma monitors create --type push --name "GH Runner" --json | jq '.data.pushToken'`)}
   ${source_default.cyan('kuma monitors create --type tcp --name "DB" --url db.host:5432 --interval 30 --notification-id 1')}
 
-${source_default.dim("Pipeline usage:")}
-  ${source_default.cyan(`MONITOR_ID=$(kuma monitors create --type http --name "svc" --url https://svc.example.com --json | jq '.data.id')`)}
-  ${source_default.cyan("kuma monitors set-notification $MONITOR_ID --notification-id $NOTIF_ID")}
+${source_default.dim("Full pipeline (deploy \u2192 monitor \u2192 heartbeat):")}
+  ${source_default.cyan('RESULT=$(kuma monitors create --type push --name "runner" --json)')}
+  ${source_default.cyan("PUSH_TOKEN=$(echo $RESULT | jq -r '.data.pushToken')")}
+  ${source_default.cyan('kuma heartbeat send $PUSH_TOKEN --msg "Alive"')}
 `
   ).action(async (opts) => {
     const config = getConfig();
@@ -30636,14 +30643,18 @@ ${source_default.dim("Pipeline usage:")}
         interval
       });
       const monitorId = result.id;
+      let pushToken = result.pushToken ?? null;
+      const tagWarnings = [];
       if (opts.tag.length > 0) {
         const allTags = await client.getTags();
         const tagMap = new Map(allTags.map((t) => [t.name.toLowerCase(), t]));
         for (const tagName of opts.tag) {
           const found = tagMap.get(tagName.toLowerCase());
           if (!found) {
+            const warn2 = `Tag "${tagName}" not found \u2014 skipping. Create it in the Kuma UI first.`;
+            tagWarnings.push(warn2);
             if (!json) {
-              error(`Tag "${tagName}" not found \u2014 skipping (create it in the Kuma UI first)`);
+              console.warn(source_default.yellow(`\u26A0\uFE0F  ${warn2}`));
             }
             continue;
           }
@@ -30658,11 +30669,28 @@ ${source_default.dim("Pipeline usage:")}
       }
       client.disconnect();
       if (json) {
-        jsonOut({ id: monitorId, name: opts.name, type: opts.type, url: opts.url, interval });
+        const data = {
+          id: monitorId,
+          name: opts.name,
+          type: opts.type,
+          url: opts.url ?? null,
+          interval
+        };
+        if (pushToken) data.pushToken = pushToken;
+        if (tagWarnings.length > 0) data.warnings = tagWarnings;
+        jsonOut(data, tagWarnings.length > 0 ? 1 : 0);
       }
       success(`Monitor "${opts.name}" created (ID: ${monitorId})`);
+      if (pushToken) {
+        console.log(`   Push token: ${source_default.cyan(pushToken)}`);
+        console.log(`   Push URL:   ${source_default.dim(`${config.url}/api/push/${pushToken}`)}`);
+      }
       if (opts.tag.length > 0) {
-        console.log(`   Tags: ${opts.tag.join(", ")}`);
+        const applied = opts.tag.filter((t) => !tagWarnings.some((w) => w.includes(t)));
+        if (applied.length > 0) console.log(`   Tags: ${applied.join(", ")}`);
+      }
+      if (tagWarnings.length > 0) {
+        process.exit(1);
       }
     } catch (err) {
       handleError(err, opts);
@@ -31030,10 +31058,10 @@ ${source_default.dim("Run")} ${source_default.cyan("kuma heartbeat <subcommand> 
     "after",
     `
 ${source_default.dim("Examples:")}
-  ${source_default.cyan("kuma heartbeat view 42")}                  Last 20 heartbeats for monitor 42
-  ${source_default.cyan("kuma heartbeat view 42 --limit 50")}       Last 50 heartbeats
-  ${source_default.cyan("kuma heartbeat view 42 --json")}           Machine-readable output
-  ${source_default.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}   Show failures
+  ${source_default.cyan("kuma heartbeat view 42")}
+  ${source_default.cyan("kuma heartbeat view 42 --limit 50")}
+  ${source_default.cyan("kuma heartbeat view 42 --json")}
+  ${source_default.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}
 `
   ).action(async (monitorId, opts) => {
     const config = getConfig();
@@ -31079,33 +31107,36 @@ ${source_default.dim("Examples:")}
 
 ${source_default.dim("GitHub Actions usage:")}
   ${source_default.cyan("- name: Heartbeat")}
-  ${source_default.cyan("  run: kuma heartbeat send ${{ secrets.RUNNER_PUSH_TOKEN }}")}
+  ${source_default.cyan("  if: always()")}
+  ${source_default.cyan("  run: kuma heartbeat send ${{ secrets.RUNNER_PUSH_TOKEN }} --status ${{ job.status == 'success' && 'up' || 'down' }}")}
 
 ${source_default.dim("Finding your push token:")}
-  Create a "Push" monitor in Kuma UI. The push URL looks like:
+  Create a "Push" monitor in Kuma UI. The push URL is:
   https://kuma.example.com/api/push/<token>
-  Use the <token> part as the argument.
+  Use only the <token> part.
+
+  Or get it from CLI: kuma monitors create --type push --name "my-runner" --json | jq '.data.pushToken'
 `
   ).action(async (pushToken, opts) => {
     const json = isJsonMode(opts);
+    const VALID_STATUSES = ["up", "down", "maintenance"];
+    const statusKey = (opts.status ?? "up").toLowerCase();
+    if (!VALID_STATUSES.includes(statusKey)) {
+      const msg = `Invalid status "${opts.status}". Valid: up, down, maintenance`;
+      if (json) jsonError(msg, EXIT_CODES.GENERAL);
+      console.error(source_default.red(`\u274C ${msg}`));
+      process.exit(EXIT_CODES.GENERAL);
+    }
     let baseUrl = opts.url;
     if (!baseUrl) {
       const config = getConfig();
       if (!config) {
-        const msg = "No --url specified and not logged in. Run: kuma login <url> or use --url";
-        if (json) jsonOut({ ok: false, error: msg });
+        const msg = "No --url specified and not logged in. Run: kuma login <url> or pass --url";
+        if (json) jsonError(msg, EXIT_CODES.AUTH);
         console.error(source_default.red(`\u274C ${msg}`));
         process.exit(EXIT_CODES.AUTH);
       }
       baseUrl = config.url;
-    }
-    const STATUS_MAP = { up: "up", down: "down", maintenance: "maintenance" };
-    const statusKey = (opts.status ?? "up").toLowerCase();
-    if (!(statusKey in STATUS_MAP)) {
-      const msg = `Invalid status "${opts.status}". Valid: up, down, maintenance`;
-      if (json) jsonOut({ ok: false, error: msg });
-      console.error(source_default.red(`\u274C ${msg}`));
-      process.exit(EXIT_CODES.GENERAL);
     }
     const pushUrl = new URL(`${baseUrl.replace(/\/$/, "")}/api/push/${pushToken}`);
     pushUrl.searchParams.set("status", statusKey);
@@ -31117,8 +31148,15 @@ ${source_default.dim("Finding your push token:")}
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        const msg = `Kuma push failed (HTTP ${res.status}): ${body}`;
-        if (json) jsonOut({ ok: false, error: msg });
+        const msg = `Push failed (HTTP ${res.status}): ${body || res.statusText}`;
+        if (json) jsonError(msg, EXIT_CODES.GENERAL);
+        console.error(source_default.red(`\u274C ${msg}`));
+        process.exit(EXIT_CODES.GENERAL);
+      }
+      const data = await res.json().catch(() => ({ ok: true }));
+      if (data.ok === false) {
+        const msg = data.msg ?? "Kuma rejected the push heartbeat";
+        if (json) jsonError(msg, EXIT_CODES.GENERAL);
         console.error(source_default.red(`\u274C ${msg}`));
         process.exit(EXIT_CODES.GENERAL);
       }
@@ -31128,7 +31166,7 @@ ${source_default.dim("Finding your push token:")}
       success(`Push heartbeat sent (${statusKey}${opts.msg ? ` \u2014 ${opts.msg}` : ""})`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (json) jsonOut({ ok: false, error: msg });
+      if (json) jsonError(msg, EXIT_CODES.CONNECTION);
       console.error(source_default.red(`\u274C ${msg}`));
       process.exit(EXIT_CODES.CONNECTION);
     }
@@ -31516,7 +31554,7 @@ ${source_default.bold("Quick Start:")}
   ${source_default.cyan("kuma login https://kuma.example.com")}   Authenticate (saves session)
   ${source_default.cyan("kuma monitors list")}                    List all monitors + status
   ${source_default.cyan('kuma monitors add --name "My API" --type http --url https://api.example.com')}
-  ${source_default.cyan("kuma heartbeat 42")}                     View recent heartbeats for monitor 42
+  ${source_default.cyan("kuma heartbeat view 42")}                View recent heartbeats for monitor 42
   ${source_default.cyan("kuma logout")}                           Clear saved session
 
 ${source_default.bold("JSON / scripting mode:")}

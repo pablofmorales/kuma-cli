@@ -271,21 +271,22 @@ ${chalk.dim("Examples:")}
     .requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...")
     .option("--url <url>", "URL or hostname to monitor")
     .option("--interval <seconds>", "Check interval in seconds (default: 60)", "60")
-    .option("--tag <tag>", "Assign a tag by name (repeatable)", collect, [])
+    .option("--tag <tag>", "Assign a tag by name (repeatable — must already exist in Kuma)", collect, [])
     .option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, [])
-    .option("--json", "Output as JSON ({ ok, data }) — prints monitor ID to stdout")
+    .option("--json", "Output as JSON ({ ok, data }) — prints monitor ID and pushToken to stdout")
     .addHelpText(
       "after",
       `
 ${chalk.dim("Examples:")}
   ${chalk.cyan("kuma monitors create --type http --name \"habitu.ar\" --url https://habitu.ar")}
   ${chalk.cyan("kuma monitors create --type http --name \"My API\" --url https://api.example.com --tag Production --tag BlackAsteroid")}
-  ${chalk.cyan("kuma monitors create --type push --name \"GH Runner\" --json | jq '.data.id'")}
+  ${chalk.cyan("kuma monitors create --type push --name \"GH Runner\" --json | jq '.data.pushToken'")}
   ${chalk.cyan("kuma monitors create --type tcp --name \"DB\" --url db.host:5432 --interval 30 --notification-id 1")}
 
-${chalk.dim("Pipeline usage:")}
-  ${chalk.cyan("MONITOR_ID=$(kuma monitors create --type http --name \"svc\" --url https://svc.example.com --json | jq '.data.id')")}
-  ${chalk.cyan("kuma monitors set-notification $MONITOR_ID --notification-id $NOTIF_ID")}
+${chalk.dim("Full pipeline (deploy → monitor → heartbeat):")}
+  ${chalk.cyan("RESULT=\$(kuma monitors create --type push --name \"runner\" --json)")}
+  ${chalk.cyan("PUSH_TOKEN=\$(echo \$RESULT | jq -r '.data.pushToken')")}
+  ${chalk.cyan("kuma heartbeat send \$PUSH_TOKEN --msg \"Alive\"")}
 `
     )
     .action(async (opts: {
@@ -319,6 +320,12 @@ ${chalk.dim("Pipeline usage:")}
           interval,
         });
         const monitorId = result.id;
+        // pushToken is returned directly from addMonitor for push monitors
+        // (auto-generated in the client before sending to Kuma)
+        let pushToken: string | null = result.pushToken ?? null;
+
+        // BUG-02 fix: track tag warnings explicitly so JSON consumers can see them
+        const tagWarnings: string[] = [];
 
         // Assign tags if specified
         if (opts.tag.length > 0) {
@@ -328,8 +335,10 @@ ${chalk.dim("Pipeline usage:")}
           for (const tagName of opts.tag) {
             const found = tagMap.get(tagName.toLowerCase());
             if (!found) {
+              const warn = `Tag "${tagName}" not found — skipping. Create it in the Kuma UI first.`;
+              tagWarnings.push(warn);
               if (!json) {
-                error(`Tag "${tagName}" not found — skipping (create it in the Kuma UI first)`);
+                console.warn(chalk.yellow(`⚠️  ${warn}`));
               }
               continue;
             }
@@ -348,12 +357,31 @@ ${chalk.dim("Pipeline usage:")}
         client.disconnect();
 
         if (json) {
-          jsonOut({ id: monitorId, name: opts.name, type: opts.type, url: opts.url, interval });
+          const data: Record<string, unknown> = {
+            id: monitorId,
+            name: opts.name,
+            type: opts.type,
+            url: opts.url ?? null,
+            interval,
+          };
+          if (pushToken) data.pushToken = pushToken;
+          if (tagWarnings.length > 0) data.warnings = tagWarnings;
+          // BUG-02: exit 1 when warnings exist so pipelines can detect the issue
+          jsonOut(data, tagWarnings.length > 0 ? 1 : 0);
         }
 
         success(`Monitor "${opts.name}" created (ID: ${monitorId})`);
+        if (pushToken) {
+          console.log(`   Push token: ${chalk.cyan(pushToken)}`);
+          console.log(`   Push URL:   ${chalk.dim(`${config!.url}/api/push/${pushToken}`)}`);
+        }
         if (opts.tag.length > 0) {
-          console.log(`   Tags: ${opts.tag.join(", ")}`);
+          const applied = opts.tag.filter((t) => !tagWarnings.some((w) => w.includes(t)));
+          if (applied.length > 0) console.log(`   Tags: ${applied.join(", ")}`);
+        }
+        // BUG-02: exit 1 if any tags were not found — makes pipeline failures visible
+        if (tagWarnings.length > 0) {
+          process.exit(1);
         }
       } catch (err) {
         handleError(err, opts);

@@ -30,7 +30,7 @@ ${chalk.bold("Quick Start:")}
   ${chalk.cyan("kuma login https://kuma.example.com")}   Authenticate (saves session)
   ${chalk.cyan("kuma monitors list")}                    List all monitors + status
   ${chalk.cyan("kuma monitors add --name \"My API\" --type http --url https://api.example.com")}
-  ${chalk.cyan("kuma heartbeat 42")}                     View recent heartbeats for monitor 42
+  ${chalk.cyan("kuma heartbeat view 42")}                View recent heartbeats for monitor 42
   ${chalk.cyan("kuma logout")}                           Clear saved session
 
 ${chalk.bold("JSON / scripting mode:")}

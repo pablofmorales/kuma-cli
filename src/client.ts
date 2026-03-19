@@ -232,7 +232,16 @@ export class KumaClient {
 
   // BUG-01 fix: addMonitor uses callback, not a separate event
   // BUG-03 fix: include required fields accepted_statuscodes, maxretries, retryInterval
-  async addMonitor(monitor: Partial<Monitor>): Promise<{ id: number }> {
+  async addMonitor(monitor: Partial<Monitor> & { pushToken?: string }): Promise<{ id: number; pushToken?: string }> {
+    // Auto-generate a pushToken for push monitors if not provided.
+    // Kuma stores it on the monitor bean; without this it stays null.
+    const autoToken =
+      monitor.type === "push" && !monitor.pushToken
+        ? Array.from(crypto.getRandomValues(new Uint8Array(24)))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+        : undefined;
+
     const payload = {
       accepted_statuscodes: ["200-299"],
       maxretries: 1,
@@ -241,6 +250,7 @@ export class KumaClient {
       rabbitmqNodes: [],
       kafkaProducerBrokers: [],
       kafkaProducerSaslOptions: { mechanism: "none" },
+      ...(autoToken ? { pushToken: autoToken } : {}),
       ...monitor,
     };
     return new Promise((resolve, reject) => {
@@ -258,7 +268,11 @@ export class KumaClient {
             reject(new Error(result.msg ?? "Failed to add monitor"));
             return;
           }
-          resolve({ id: result.monitorID! });
+          resolve({
+            id: result.monitorID!,
+            // Return the token we generated so the caller has it immediately
+            pushToken: (payload as { pushToken?: string }).pushToken,
+          });
         }
       );
     });
