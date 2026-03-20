@@ -1,3 +1,9 @@
+## [1.3.1](https://github.com/BlackAsteroid/kuma-cli/compare/v1.3.0...v1.3.1) (2026-03-20)
+
+### 🐛 Bug Fixes
+
+* **security:** prevent notification config injection during import ([#51](https://github.com/BlackAsteroid/kuma-cli/issues/51)) ([00bb2d4](https://github.com/BlackAsteroid/kuma-cli/commit/00bb2d4b1853019c057d2a89ab5bfc40f2a78b7c)), closes [#49](https://github.com/BlackAsteroid/kuma-cli/issues/49)
+
 ## [1.3.0](https://github.com/BlackAsteroid/kuma-cli/compare/v1.2.1...v1.3.0) (2026-03-20)
 
 ### 🚀 Features
