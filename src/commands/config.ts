@@ -122,7 +122,7 @@ export function configCommand(program: Command): void {
         const raw = readFileSync(file, "utf8");
         let data: any;
         if (file.endsWith(".yaml") || file.endsWith(".yml")) {
-          data = yaml.load(raw);
+          data = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
         } else {
           data = JSON.parse(raw);
         }

@@ -34336,7 +34336,7 @@ function configCommand(program3) {
       const raw = (0, import_fs2.readFileSync)(file, "utf8");
       let data;
       if (file.endsWith(".yaml") || file.endsWith(".yml")) {
-        data = jsYaml.load(raw);
+        data = jsYaml.load(raw, { schema: jsYaml.JSON_SCHEMA });
       } else {
         data = JSON.parse(raw);
       }
