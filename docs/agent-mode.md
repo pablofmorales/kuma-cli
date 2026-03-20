@@ -55,7 +55,7 @@ You can perform advanced filtering to query the exact monitors you need:
 - `--status <up|down|pending|maintenance>`: Filter by monitor status
 - `--search <query>`: Case-insensitive search by name or URL
 - `--has-notification`: Only monitors with at least one notification
-- `--no-notification`: Only monitors with NO notifications (useful for audits)
+- `--without-notification`: Only monitors with NO notifications (useful for audits)
 - `--uptime-below <percent>`: Only monitors with 24h uptime below the threshold
 
 Example: Find all "Production" monitors that are down:
@@ -65,7 +65,7 @@ kuma monitors list --tag Production --status down --json
 
 Example: Audit monitors missing notifications:
 ```bash
-kuma monitors list --no-notification --json
+kuma monitors list --without-notification --json
 ```
 
 ## Config Export & Import
