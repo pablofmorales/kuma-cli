@@ -72,7 +72,7 @@ ${chalk.dim("Run")} ${chalk.cyan("kuma monitors <subcommand> --help")} ${chalk.d
     )
     .option("--tag <tag>", "Filter to monitors that have this tag name")
     .option("--has-notification", "Filter to monitors that have at least one notification configured")
-    .option("--no-notification", "Filter to monitors that have no notifications configured")
+    .option("--without-notification", "Filter to monitors that have no notifications configured")
     .option("--search <query>", "Filter by monitor name or URL/hostname (case-insensitive)")
     .option("--uptime-below <percent>", "Filter to monitors with 24h uptime below this percentage (e.g. 99.9)")
     .option("--include-notifications", "Include notification channels in the JSON output")
@@ -83,7 +83,7 @@ ${chalk.dim("Examples:")}
   ${chalk.cyan("kuma monitors list")}                        List all monitors
   ${chalk.cyan("kuma monitors list --status down")}          Show only DOWN monitors
   ${chalk.cyan("kuma monitors list --tag production")}       Filter by tag
-  ${chalk.cyan("kuma monitors list --no-notification")}      Audit monitors missing alerts
+  ${chalk.cyan("kuma monitors list --without-notification")} Audit monitors missing alerts
   ${chalk.cyan("kuma monitors list --uptime-below 99.0")}    Find SLA-breaching monitors
   ${chalk.cyan("kuma monitors list --json | jq '.data[].name'")}
 `
@@ -94,7 +94,7 @@ ${chalk.dim("Examples:")}
         status?: string; 
         tag?: string;
         hasNotification?: boolean;
-        noNotification?: boolean;
+        withoutNotification?: boolean;
         search?: string;
         uptimeBelow?: string;
         includeNotifications?: boolean;
@@ -104,8 +104,8 @@ ${chalk.dim("Examples:")}
 
         const json = isJsonMode(opts);
 
-        if (opts.hasNotification && opts.noNotification) {
-          handleError(new Error("Cannot use both --has-notification and --no-notification"), opts);
+        if (opts.hasNotification && opts.withoutNotification) {
+          handleError(new Error("Cannot use both --has-notification and --without-notification"), opts);
         }
 
         const uptimeThreshold = opts.uptimeBelow ? parseFloat(opts.uptimeBelow) : undefined;
@@ -161,8 +161,8 @@ ${chalk.dim("Examples:")}
             );
           }
 
-          // Apply --has-notification / --no-notification filter
-          if (opts.hasNotification || opts.noNotification) {
+          // Apply --has-notification / --without-notification filter
+          if (opts.hasNotification || opts.withoutNotification) {
             list = list.filter((m: Monitor) => {
               const hasAny = m.notificationIDList
                 ? Object.values(m.notificationIDList).some((enabled) => enabled)

@@ -30482,14 +30482,14 @@ ${source_default.dim("Run")} ${source_default.cyan("kuma monitors <subcommand> -
   monitors.command("list").description("List all monitors with live status, uptime, and ping").option("--json", "Output as JSON ({ ok, data })").option(
     "--status <status>",
     "Filter to a specific status: up, down, pending, maintenance"
-  ).option("--tag <tag>", "Filter to monitors that have this tag name").option("--has-notification", "Filter to monitors that have at least one notification configured").option("--no-notification", "Filter to monitors that have no notifications configured").option("--search <query>", "Filter by monitor name or URL/hostname (case-insensitive)").option("--uptime-below <percent>", "Filter to monitors with 24h uptime below this percentage (e.g. 99.9)").option("--include-notifications", "Include notification channels in the JSON output").addHelpText(
+  ).option("--tag <tag>", "Filter to monitors that have this tag name").option("--has-notification", "Filter to monitors that have at least one notification configured").option("--without-notification", "Filter to monitors that have no notifications configured").option("--search <query>", "Filter by monitor name or URL/hostname (case-insensitive)").option("--uptime-below <percent>", "Filter to monitors with 24h uptime below this percentage (e.g. 99.9)").option("--include-notifications", "Include notification channels in the JSON output").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma monitors list")}                        List all monitors
   ${source_default.cyan("kuma monitors list --status down")}          Show only DOWN monitors
   ${source_default.cyan("kuma monitors list --tag production")}       Filter by tag
-  ${source_default.cyan("kuma monitors list --no-notification")}      Audit monitors missing alerts
+  ${source_default.cyan("kuma monitors list --without-notification")} Audit monitors missing alerts
   ${source_default.cyan("kuma monitors list --uptime-below 99.0")}    Find SLA-breaching monitors
   ${source_default.cyan("kuma monitors list --json | jq '.data[].name'")}
 `
@@ -30498,8 +30498,8 @@ ${source_default.dim("Examples:")}
       const config = getConfig();
       if (!config) requireAuth(opts);
       const json2 = isJsonMode(opts);
-      if (opts.hasNotification && opts.noNotification) {
-        handleError(new Error("Cannot use both --has-notification and --no-notification"), opts);
+      if (opts.hasNotification && opts.withoutNotification) {
+        handleError(new Error("Cannot use both --has-notification and --without-notification"), opts);
       }
       const uptimeThreshold = opts.uptimeBelow ? parseFloat(opts.uptimeBelow) : void 0;
       if (uptimeThreshold !== void 0 && isNaN(uptimeThreshold)) {
@@ -30543,7 +30543,7 @@ ${source_default.dim("Examples:")}
             (m) => Array.isArray(m.tags) && m.tags.some((t) => t.name.toLowerCase() === tagName)
           );
         }
-        if (opts.hasNotification || opts.noNotification) {
+        if (opts.hasNotification || opts.withoutNotification) {
           list = list.filter((m) => {
             const hasAny = m.notificationIDList ? Object.values(m.notificationIDList).some((enabled) => enabled) : false;
             return opts.hasNotification ? hasAny : !hasAny;
