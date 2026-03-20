@@ -7,6 +7,17 @@ import { readFileSync, writeFileSync } from "fs";
 import yaml from "js-yaml";
 import chalk from "chalk";
 
+/**
+ * Denylist of forbidden notification configuration properties.
+ * Strips properties that could be used to manipulate the local client
+ * or attempt injection on the Kuma API endpoint.
+ */
+const FORBIDDEN_NOTIFICATION_FIELDS = new Set([
+  "__proto__", "constructor", "prototype",
+  // Kuma internal columns that shouldn't be overridden via config blob
+  "id", "user_id"
+]);
+
 export function configCommand(program: Command): void {
   const cfg = program.command("config").description("Export and import Kuma configuration");
 
@@ -181,7 +192,18 @@ export function configCommand(program: Command): void {
                 } catch {
                   // ignore
                 }
-                await client.addNotification({ ...parsedConfig, name: n.name, type: parsedConfig.type || n.type } as any, existing.id);
+
+                // Security fix #49: apply denylist before sending to Kuma API
+                const safeConfig: Record<string, any> = {};
+                for (const [k, v] of Object.entries(parsedConfig)) {
+                  if (FORBIDDEN_NOTIFICATION_FIELDS.has(k) || k.startsWith("__")) {
+                    if (!json) console.warn(chalk.yellow(`⚠️  Ignored forbidden notification field: ${k}`));
+                  } else {
+                    safeConfig[k] = v;
+                  }
+                }
+
+                await client.addNotification({ ...safeConfig, name: n.name, type: safeConfig.type || n.type } as any, existing.id);
               }
             } else {
               skippedNotifCount++;
@@ -195,7 +217,18 @@ export function configCommand(program: Command): void {
               } catch {
                 // ignore
               }
-              await client.addNotification({ ...parsedConfig, name: n.name, type: parsedConfig.type || n.type } as any);
+
+              // Security fix #49: apply denylist before sending to Kuma API
+              const safeConfig: Record<string, any> = {};
+              for (const [k, v] of Object.entries(parsedConfig)) {
+                if (FORBIDDEN_NOTIFICATION_FIELDS.has(k) || k.startsWith("__")) {
+                  if (!json) console.warn(chalk.yellow(`⚠️  Ignored forbidden notification field: ${k}`));
+                } else {
+                  safeConfig[k] = v;
+                }
+              }
+
+              await client.addNotification({ ...safeConfig, name: n.name, type: safeConfig.type || n.type } as any);
             }
           }
         }
