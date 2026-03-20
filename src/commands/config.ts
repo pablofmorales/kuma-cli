@@ -175,7 +175,7 @@ export function configCommand(program: Command): void {
             if (opts.onConflict === "update") {
               updatedNotifCount++;
               if (!opts.dryRun) {
-                let parsedConfig = {};
+                let parsedConfig: Record<string, any> = {};
                 try {
                   parsedConfig = JSON.parse(n.config);
                 } catch {
@@ -189,7 +189,7 @@ export function configCommand(program: Command): void {
           } else {
             createdNotifCount++;
             if (!opts.dryRun) {
-              let parsedConfig = {};
+              let parsedConfig: Record<string, any> = {};
               try {
                 parsedConfig = JSON.parse(n.config);
               } catch {
