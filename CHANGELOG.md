@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/BlackAsteroid/kuma-cli/compare/v1.4.0...v1.4.1) (2026-03-26)
+
+### 📚 Documentation
+
+* add Homebrew install to README + bump docs → patch release ([896cb50](https://github.com/BlackAsteroid/kuma-cli/commit/896cb505e6c2ff8aaafc84dcc7dc017ae148be7b))
+
 ## [1.4.0](https://github.com/BlackAsteroid/kuma-cli/compare/v1.3.1...v1.4.0) (2026-03-26)
 
 ### 🚀 Features

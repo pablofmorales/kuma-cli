@@ -1,6 +1,6 @@
 {
   "name": "@blackasteroid/kuma-cli",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "CLI for managing Uptime Kuma via Socket.IO API",
   "bin": {
     "kuma": "dist/index.js"
