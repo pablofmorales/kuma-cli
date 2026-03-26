@@ -6,6 +6,15 @@
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap BlackAsteroid/tap
+brew install kuma-cli
+```
+
+### npm
+
 ```bash
 npm install -g @blackasteroid/kuma-cli
 ```
