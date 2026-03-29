@@ -9,6 +9,7 @@ import { notificationsCommand } from "./commands/notifications.js";
 import { configCommand } from "./commands/config.js";
 import { instancesCommand } from "./commands/instances.js";
 import { useCommand } from "./commands/use.js";
+import { clusterCommand } from "./commands/cluster.js";
 import { getConfig, getConfigPath, getAllInstances, getAllClusters, getActiveContext, getInstanceConfig, getInstanceCluster } from "./config.js";
 import chalk from "chalk";
 import { isJsonMode, jsonOut } from "./utils/output.js";
@@ -136,5 +137,6 @@ notificationsCommand(program);
 configCommand(program);
 instancesCommand(program);
 useCommand(program);
+clusterCommand(program);
 
 program.parse(process.argv);
