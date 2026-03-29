@@ -7,7 +7,9 @@ import { statusPagesCommand } from "./commands/status-pages.js";
 import { upgradeCommand } from "./commands/upgrade.js";
 import { notificationsCommand } from "./commands/notifications.js";
 import { configCommand } from "./commands/config.js";
-import { getConfig, getConfigPath } from "./config.js";
+import { instancesCommand } from "./commands/instances.js";
+import { useCommand } from "./commands/use.js";
+import { getConfig, getConfigPath, getAllInstances, getAllClusters, getActiveContext, getInstanceConfig, getInstanceCluster } from "./config.js";
 import chalk from "chalk";
 import { isJsonMode, jsonOut } from "./utils/output.js";
 
@@ -65,30 +67,62 @@ ${chalk.dim("Examples:")}
   )
   .action((opts: { json?: boolean }) => {
     const json = isJsonMode(opts);
-    const config = getConfig();
+    const active = getActiveContext();
+    const instances = getAllInstances();
+    const clusters = getAllClusters();
+    const instanceCount = Object.keys(instances).length;
+    const clusterCount = Object.keys(clusters).length;
+    const configPath = getConfigPath();
 
-    if (!config) {
-      if (json) {
-        jsonOut({ loggedIn: false });
-      }
+    if (json) {
+      const config = getConfig();
+      return jsonOut({
+        loggedIn: !!config,
+        active: active ?? undefined,
+        url: config?.url,
+        instanceCount,
+        clusterCount,
+        configPath,
+      });
+    }
+
+    if (!active && instanceCount === 0) {
       console.log(chalk.yellow("Not logged in. Run: kuma login <url>"));
       return;
     }
 
-    if (json) {
-      jsonOut({
-        loggedIn: true,
-        url: config.url,
-        configPath: getConfigPath(),
-      });
+    if (active?.type === "instance") {
+      const inst = getInstanceConfig(active.name);
+      if (inst) {
+        console.log(chalk.green(`Active: ${active.name}`) + ` (${chalk.cyan(inst.url)})`);
+        const clusterName = getInstanceCluster(active.name);
+        if (clusterName) {
+          console.log(`         Member of cluster: ${chalk.magenta(clusterName)}`);
+        }
+      } else {
+        console.log(chalk.yellow(`Active instance '${active.name}' not found in config.`));
+      }
+    } else if (active?.type === "cluster") {
+      const cluster = clusters[active.name];
+      if (cluster) {
+        const primaryInst = getInstanceConfig(cluster.primary);
+        const primaryUrl = primaryInst ? ` (${chalk.cyan(primaryInst.url)})` : "";
+        console.log(chalk.green(`Active: cluster '${active.name}'`) + ` primary: ${cluster.primary}${primaryUrl}`);
+      } else {
+        console.log(chalk.yellow(`Active cluster '${active.name}' not found in config.`));
+      }
+    } else if (instanceCount === 1) {
+      const name = Object.keys(instances)[0];
+      const inst = instances[name];
+      console.log(chalk.green(`Active: ${name}`) + ` (${chalk.cyan(inst.url)})`);
+    } else {
+      console.log(chalk.yellow("No active context set. Run: kuma use <instance>"));
     }
 
-    console.log(chalk.green("✅ Logged in"));
-    console.log(`   URL:    ${chalk.cyan(config.url)}`);
-    console.log(
-      `   Token:  ${chalk.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
-    );
-    console.log(`   Config: ${chalk.dim(getConfigPath())}`);
+    console.log();
+    console.log(`Instances: ${chalk.bold(String(instanceCount))}`);
+    console.log(`Clusters:  ${chalk.bold(String(clusterCount))}`);
+    console.log(`Config:    ${chalk.dim(configPath)}`);
   });
 
 // Register all commands
@@ -100,5 +134,7 @@ statusPagesCommand(program);
 upgradeCommand(program);
 notificationsCommand(program);
 configCommand(program);
+instancesCommand(program);
+useCommand(program);
 
 program.parse(process.argv);
