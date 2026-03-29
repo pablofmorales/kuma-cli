@@ -8,6 +8,8 @@
 
 **Tech Stack:** Existing stack (TypeScript, Commander.js, Socket.IO, conf library). No new dependencies required.
 
+**Tracking:** https://github.com/BlackAsteroid/kuma-cli/issues/59
+
 ---
 
 ## 1. Config Schema & Migration
