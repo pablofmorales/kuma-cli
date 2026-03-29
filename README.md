@@ -40,13 +40,19 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 
 ## Commands
 
-### Auth
+### Auth & Instances
 
 | Command | Description |
 |---------|-------------|
 | `kuma login <url>` | Authenticate with Uptime Kuma and save session |
-| `kuma logout` | Clear saved session credentials |
-| `kuma status` | Show current connection config |
+| `kuma login <url> --as <alias>` | Save the instance under a custom alias |
+| `kuma logout` | Clear token for the active instance |
+| `kuma logout --all` | Clear all saved instances and config |
+| `kuma status` | Show active instance, cluster membership, and config path |
+| `kuma instances list` | List all saved instances and their aliases |
+| `kuma instances remove <name>` | Remove a saved instance by its alias |
+| `kuma use <name>` | Switch the active instance |
+| `kuma use --cluster <name>` | Switch the active cluster |
 
 ### Monitors
 
@@ -94,6 +100,18 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 | `kuma status-pages list` | List all status pages |
 | `kuma status-pages list --json` | Output raw JSON |
 
+### Clusters
+
+| Command | Description |
+|---------|-------------|
+| `kuma cluster create <name> --instances a,b --primary a` | Create a cluster from saved instances |
+| `kuma cluster list` | List all clusters |
+| `kuma cluster info <name>` | Show cluster details with live instance status |
+| `kuma cluster sync <name>` | Sync monitors and notifications from primary to secondaries |
+| `kuma cluster sync <name> --dry-run` | Preview sync without making changes |
+| `kuma cluster remove <name>` | Remove a cluster definition |
+| `kuma monitors list --cluster <name>` | Unified view across all cluster instances |
+
 ### Config Export/Import
 
 | Command | Description |
@@ -102,6 +120,110 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 | `kuma config import <file>` | Import monitors and notifications from a file |
 
 For detailed usage, check [Config Export & Import](./docs/config-export-import.md).
+
+## Multi-Instance & Clusters
+
+kuma-cli can manage multiple Uptime Kuma servers and cluster them together for high availability.
+
+### Connecting to multiple instances
+
+Each time you login, you give the instance an **alias** — a short name you'll use to reference it in other commands. If you don't provide one, it's auto-derived from the hostname.
+
+```bash
+# Login and name each instance
+$ kuma login https://kuma1.example.com --as server1
+  ✓ Logged in to https://kuma1.example.com as "server1"
+
+$ kuma login https://kuma2.example.com --as server2
+  ✓ Logged in to https://kuma2.example.com as "server2"
+```
+
+The alias is how you reference this instance everywhere: `--instance server1`, `kuma use server1`, and when creating clusters.
+
+```bash
+# See all saved instances
+$ kuma instances list
+     Name     URL                          Token
+  →  server1  https://kuma1.example.com    ab12...ef56
+     server2  https://kuma2.example.com    cd34...gh78
+
+# Switch the active instance
+$ kuma use server2
+  ✓ Active instance: 'server2' (https://kuma2.example.com)
+
+# Or target a specific instance per-command without switching
+$ kuma monitors list --instance server1
+```
+
+### Creating a cluster
+
+A **cluster** groups instances together for HA. You need to be logged in to each instance first.
+
+- `<name>` is any label you choose (e.g. `my-cluster`, `prod-ha`)
+- `--instances` takes the aliases you created with `--as` during login
+- `--primary` is the source of truth — its monitors get replicated to the others
+
+```bash
+# Create a cluster (this is a local config operation, no network calls)
+$ kuma cluster create my-cluster --instances server1,server2 --primary server1
+  ✓ Cluster 'my-cluster' created with instances: server1, server2 (primary: server1)
+
+# See all clusters
+$ kuma cluster list
+  Name        Instances        Primary
+  my-cluster  server1, server2 server1
+```
+
+### Syncing a cluster
+
+`cluster sync` copies the primary's monitors to all secondaries. It's **idempotent** — existing monitors (matched by name + type + URL) are skipped.
+
+```bash
+# Preview what would be synced
+$ kuma cluster sync my-cluster --dry-run
+
+# Run the actual sync
+$ kuma cluster sync my-cluster
+  ℹ Syncing cluster 'my-cluster' (primary: server1)
+  ℹ Monitors to sync: 42
+
+  ℹ server1 → server2: 3 created, 39 skipped, 0 failed
+  ℹ Health monitors: 2 created, 0 skipped
+  ℹ Notifications: 5 synced (disabled on secondaries), 0 skipped
+  ✓ Sync complete.
+```
+
+**What gets synced:**
+1. **Monitors** from the primary are replicated to each secondary
+2. **Health monitors** — each instance gets an HTTP check targeting every other instance's URL, so you can see in Uptime Kuma's dashboard if a cluster member goes down
+3. **Notifications** are copied to secondaries but **kept disabled** to avoid duplicate alerts. The primary owns active notifications.
+
+### Unified cluster view
+
+See all monitors across the cluster in a single view. Monitors are deduplicated by name — if one instance reports DOWN while another reports UP, the worst status wins.
+
+```bash
+$ kuma monitors list --cluster my-cluster
+  ℹ Cluster 'my-cluster' — unified view (42 monitors, worst-status-wins)
+
+  ID   Name        Type  URL / Host             Status  Uptime 24h  Ping
+  1    My API      http  https://api.example    ● UP    99.8%       45ms
+  2    Homepage    http  https://example.com    ● DOWN  94.2%       --
+  3    Database    tcp   db.internal:5432       ● UP    100%        12ms
+```
+
+### Cluster health
+
+Check instance connectivity and health monitor status:
+
+```bash
+$ kuma cluster info my-cluster
+  ℹ Cluster: my-cluster
+
+     Instance  URL                        Reachable  Monitors  Health Monitors
+  →  server1   https://kuma1.example.com  yes        42        —
+     server2   https://kuma2.example.com  yes        42        [cluster] server1: ● UP
+```
 
 ## Using with AI agents
 
@@ -160,10 +282,18 @@ After login, your session is saved automatically — you won't need to re-authen
 
 ```json
 {
-  "url": "https://kuma.example.com",
-  "token": "***"
+  "instances": {
+    "server1": { "url": "https://kuma1.example.com", "token": "***" },
+    "server2": { "url": "https://kuma2.example.com", "token": "***" }
+  },
+  "clusters": {
+    "my-cluster": { "instances": ["server1", "server2"], "primary": "server1" }
+  },
+  "active": { "type": "instance", "name": "server1" }
 }
 ```
+
+> **Upgrading from a previous version?** The old `{url, token}` config is auto-migrated on first run. The instance alias is derived from the hostname.
 
 Run `kuma status` to see the exact config path on your machine.
 
@@ -191,18 +321,24 @@ npm run typecheck  # tsc --noEmit
 
 ```
 src/
-├── index.ts          # Entry point, CLI setup
-├── client.ts         # Socket.IO connection + auth
-├── config.ts         # ~/.kuma-cli.json persistence
+├── index.ts              # Entry point, CLI setup
+├── client.ts             # Socket.IO connection + auth
+├── config.ts             # Multi-instance config persistence + migration
+├── instance-manager.ts   # Instance/cluster resolution logic
 ├── commands/
 │   ├── login.ts
 │   ├── logout.ts
 │   ├── monitors.ts
+│   ├── heartbeat.ts
+│   ├── notifications.ts
 │   ├── status-pages.ts
-│   └── heartbeat.ts
+│   ├── config.ts         # Export/import
+│   ├── instances.ts      # Instance management
+│   ├── use.ts            # Context switching
+│   └── cluster.ts        # Cluster management + sync
 └── utils/
-    ├── output.ts     # Table rendering, chalk helpers
-    └── errors.ts     # Error formatting + exit codes
+    ├── output.ts         # Table rendering, chalk helpers
+    └── errors.ts         # Error formatting + exit codes
 ```
 
 ## License
