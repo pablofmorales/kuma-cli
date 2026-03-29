@@ -11,6 +11,8 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run"
   },
@@ -55,6 +57,7 @@
     "conventional-changelog-conventionalcommits": "^9.3.0",
     "semantic-release": "^25.0.3",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
   }
 }
