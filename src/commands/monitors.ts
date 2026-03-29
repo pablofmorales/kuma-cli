@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import enquirer from "enquirer";
-import { Monitor } from "../client.js";
-import { getInstanceConfig } from "../config.js";
+import { createAuthenticatedClient, Monitor } from "../client.js";
+import { getClusterConfig, getInstanceConfig } from "../config.js";
 import { resolveClient } from "../instance-manager.js";
 import {
   createTable,
@@ -10,8 +10,10 @@ import {
   formatPing,
   success,
   error,
+  info,
   isJsonMode,
   jsonOut,
+  jsonError,
 } from "../utils/output.js";
 import { handleError } from "../utils/errors.js";
 import chalk from "chalk";
@@ -78,6 +80,7 @@ ${chalk.dim("Run")} ${chalk.cyan("kuma monitors <subcommand> --help")} ${chalk.d
     .option("--uptime-below <percent>", "Filter to monitors with 24h uptime below this percentage (e.g. 99.9)")
     .option("--include-notifications", "Include notification channels in the JSON output")
     .option("--instance <name>", "Target a specific instance")
+    .option("--cluster <name>", "Show a unified view across all instances in a named cluster")
     .addHelpText(
       "after",
       `
@@ -101,7 +104,110 @@ ${chalk.dim("Examples:")}
         uptimeBelow?: string;
         includeNotifications?: boolean;
         instance?: string;
+        cluster?: string;
       }) => {
+        // ---------------------------------------------------------------
+        // Cluster unified view
+        // ---------------------------------------------------------------
+        if (opts.cluster) {
+          const clusterConfig = getClusterConfig(opts.cluster);
+          if (!clusterConfig) {
+            if (isJsonMode(opts)) return jsonError(`Cluster '${opts.cluster}' not found.`);
+            error(`Cluster '${opts.cluster}' not found.`);
+            process.exit(1);
+          }
+
+          const clusterTag = `kuma-cluster:${opts.cluster}`;
+
+          // Fetch from all instances concurrently
+          const allMonitors: (Monitor & { _instance: string })[] = [];
+
+          const results = await Promise.allSettled(
+            clusterConfig.instances.map(async (instanceName) => {
+              const instConfig = getInstanceConfig(instanceName);
+              if (!instConfig) return [];
+              try {
+                const client = await createAuthenticatedClient(instConfig.url, instConfig.token);
+                const monitorMap = await client.getMonitorList();
+                const monitors = Object.values(monitorMap);
+                client.disconnect();
+                return monitors
+                  .filter((m: Monitor) => !m.tags?.some((t) => t.name === clusterTag))
+                  .map((m: Monitor) => ({ ...m, _instance: instanceName }));
+              } catch {
+                return [];
+              }
+            })
+          );
+
+          for (const r of results) {
+            if (r.status === "fulfilled") allMonitors.push(...(r.value as (Monitor & { _instance: string })[]));
+          }
+
+          // Deduplicate: worst-status-wins
+          // Priority: DOWN (0) > MAINTENANCE (3) > PENDING (2) > UP (1)
+          const STATUS_PRIORITY: Record<number, number> = { 0: 0, 3: 1, 2: 2, 1: 3 };
+          const deduped = new Map<string, Monitor & { _instance: string }>();
+
+          for (const m of allMonitors) {
+            const key = `${m.name}|${m.type}|${m.url ?? m.hostname ?? ""}`;
+            const existing = deduped.get(key);
+            if (!existing) {
+              deduped.set(key, m);
+            } else {
+              const existingPri = STATUS_PRIORITY[existing.heartbeat?.status ?? 2] ?? 2;
+              const newPri = STATUS_PRIORITY[m.heartbeat?.status ?? 2] ?? 2;
+              if (newPri < existingPri) deduped.set(key, m);
+            }
+          }
+
+          const clusterMonitors = Array.from(deduped.values());
+
+          if (isJsonMode(opts)) {
+            return jsonOut({ cluster: opts.cluster, monitors: clusterMonitors });
+          }
+
+          if (clusterMonitors.length === 0) {
+            info(`Cluster '${opts.cluster}' -- unified view (0 monitors)`);
+            console.log("No monitors found.");
+            return;
+          }
+
+          const table = createTable([
+            "ID",
+            "Name",
+            "Type",
+            "URL / Host",
+            "Status",
+            "Uptime 24h",
+            "Ping",
+          ]);
+
+          for (const m of clusterMonitors) {
+            const target = m.url ?? (m.hostname ? `${m.hostname}:${m.port}` : "\u2014");
+            const status = m.heartbeat
+              ? statusLabel(m.heartbeat.status)
+              : m.active
+              ? statusLabel(2)
+              : "\u23F8 Paused";
+            table.push([
+              String(m.id),
+              m.name,
+              m.type,
+              target,
+              status,
+              formatUptime(m.uptime),
+              formatPing(m.heartbeat?.ping),
+            ]);
+          }
+
+          info(`Cluster '${opts.cluster}' \u2014 unified view (${clusterMonitors.length} monitors, worst-status-wins)\n`);
+          console.log(table.toString());
+          console.log(`\n${clusterMonitors.length} monitor(s) total`);
+          return;
+        }
+
+
         const json = isJsonMode(opts);
 
         if (opts.hasNotification && opts.withoutNotification) {
