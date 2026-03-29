@@ -221,6 +221,25 @@ export function clusterCommand(program: Command): void {
         process.exit(1);
       }
 
+      const secondaries = clusterConfig.instances.filter((i) => i !== clusterConfig.primary);
+
+      // Connect to all secondaries upfront to avoid redundant connections
+      const secClients: Record<string, ReturnType<typeof createAuthenticatedClient> extends Promise<infer T> ? T : never> = {};
+      for (const secName of secondaries) {
+        const secConfig = getInstanceConfig(secName);
+        if (!secConfig) {
+          if (!isJsonMode(opts)) warn(`Skipping '${secName}': not configured`);
+          continue;
+        }
+        try {
+          secClients[secName] = await createAuthenticatedClient(secConfig.url, secConfig.token);
+        } catch (err) {
+          if (!isJsonMode(opts)) warn(`Skipping '${secName}': ${err instanceof Error ? err.message : err}`);
+          continue;
+        }
+      }
+
+      try {
       const primaryMonitorMap = await primaryClient.getMonitorList();
       const primaryMonitors = Object.values(primaryMonitorMap);
       // Filter out cluster health monitors
@@ -233,24 +252,15 @@ export function clusterCommand(program: Command): void {
         info(`Monitors to sync: ${monitorsToSync.length}`);
       }
 
-      const secondaries = clusterConfig.instances.filter((i) => i !== clusterConfig.primary);
       const syncResults: Record<string, { created: number; skipped: number; failed: number }> = {};
 
       for (const secName of secondaries) {
-        const secConfig = getInstanceConfig(secName);
-        if (!secConfig) {
-          if (!isJsonMode(opts)) warn(`Skipping '${secName}': not configured`);
-          continue;
-        }
-
-        let secClient;
-        try {
-          secClient = await createAuthenticatedClient(secConfig.url, secConfig.token);
-        } catch (err) {
-          if (!isJsonMode(opts)) warn(`Skipping '${secName}': ${err instanceof Error ? err.message : err}`);
+        if (!secClients[secName]) {
           syncResults[secName] = { created: 0, skipped: 0, failed: monitorsToSync.length };
           continue;
         }
+
+        const secClient = secClients[secName];
 
         const secMonitorMap = await secClient.getMonitorList();
         const secMonitors = Object.values(secMonitorMap);
@@ -280,22 +290,16 @@ export function clusterCommand(program: Command): void {
         }
 
         syncResults[secName] = { created, skipped, failed };
-        secClient.disconnect();
       }
 
       // --- Cross-health monitors ---
       let healthCreated = 0, healthSkipped = 0;
 
       for (const instanceName of clusterConfig.instances) {
-        const instConfig = getInstanceConfig(instanceName);
-        if (!instConfig) continue;
-
-        let client;
-        try {
-          client = instanceName === clusterConfig.primary
-            ? primaryClient
-            : await createAuthenticatedClient(instConfig.url, instConfig.token);
-        } catch { continue; }
+        const client = instanceName === clusterConfig.primary
+          ? primaryClient
+          : secClients[instanceName];
+        if (!client) continue;
 
         const monitorMap = await client.getMonitorList();
         const monitors = Object.values(monitorMap);
@@ -327,8 +331,6 @@ export function clusterCommand(program: Command): void {
             if (!isJsonMode(opts)) warn(`  Failed to create health monitor on ${instanceName} -> ${otherName}: ${err instanceof Error ? err.message : err}`);
           }
         }
-
-        if (instanceName !== clusterConfig.primary) client.disconnect();
       }
 
       // --- Notification sync (disabled on secondaries) ---
@@ -336,13 +338,8 @@ export function clusterCommand(program: Command): void {
       let notifSynced = 0, notifSkipped = 0;
 
       for (const secName of secondaries) {
-        const secConfig = getInstanceConfig(secName);
-        if (!secConfig) continue;
-
-        let secClient;
-        try {
-          secClient = await createAuthenticatedClient(secConfig.url, secConfig.token);
-        } catch { continue; }
+        const secClient = secClients[secName];
+        if (!secClient) continue;
 
         const secNotifications = await secClient.getNotificationList();
 
@@ -369,11 +366,7 @@ export function clusterCommand(program: Command): void {
             if (!isJsonMode(opts)) warn(`  Failed to sync notification '${notif.name}' to ${secName}: ${err instanceof Error ? err.message : err}`);
           }
         }
-
-        secClient.disconnect();
       }
-
-      primaryClient.disconnect();
 
       if (isJsonMode(opts)) {
         return jsonOut({
@@ -393,5 +386,12 @@ export function clusterCommand(program: Command): void {
       info(`Notifications: ${notifSynced} synced (disabled on secondaries), ${notifSkipped} skipped`);
       if (opts.dryRun) warn("Dry run \u2014 no changes were made.");
       else success("Sync complete.");
+
+      } finally {
+        primaryClient.disconnect();
+        for (const client of Object.values(secClients)) {
+          client.disconnect();
+        }
+      }
     });
 }
