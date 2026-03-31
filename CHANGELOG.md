@@ -1,3 +1,9 @@
+## [1.5.1](https://github.com/pablofmorales/kuma-cli/compare/v1.5.0...v1.5.1) (2026-03-31)
+
+### 🐛 Bug Fixes
+
+* use pablo@blackasteroid.com.ar instead of personal email ([15a0ac8](https://github.com/pablofmorales/kuma-cli/commit/15a0ac8258a8ac20de1f57635b26f8d6510a1a31))
+
 ## [1.5.0](https://github.com/pablofmorales/kuma-cli/compare/v1.4.1...v1.5.0) (2026-03-31)
 
 ### 🚀 Features
