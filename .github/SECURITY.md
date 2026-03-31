@@ -6,7 +6,7 @@ If you discover a security vulnerability in kuma-cli, **do not open a public Git
 
 Please report it privately:
 
-- **Email:** pablofmorales@gmail.com
+- **Email:** pablo@blackasteroid.com.ar
 - **Response time:** We aim to acknowledge within 48 hours and provide a fix or mitigation within 7 days for critical issues.
 
 Include:

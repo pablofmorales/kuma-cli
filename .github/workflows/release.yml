@@ -62,7 +62,7 @@ jobs:
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/pablofmorales/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
 
-          git config user.email "pablofmorales@gmail.com"
+          git config user.email "pablo@blackasteroid.com.ar"
           git config user.name "Dante (DevOps) [bot]"
 
           # Update the formula
