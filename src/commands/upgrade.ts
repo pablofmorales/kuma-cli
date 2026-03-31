@@ -45,7 +45,7 @@ interface GithubRelease {
 async function fetchLatestRelease(): Promise<GithubRelease | null> {
   try {
     const res = await fetch(
-      "https://api.github.com/repos/BlackAsteroid/kuma-cli/releases/latest",
+      "https://api.github.com/repos/pablofmorales/kuma-cli/releases/latest",
       {
         headers: {
           "User-Agent": "kuma-cli-upgrade",

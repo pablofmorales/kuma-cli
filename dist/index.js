@@ -12661,13 +12661,13 @@ var require_websocket_server = __commonJS({
           }
         }
         if (this.options.verifyClient) {
-          const info = {
+          const info2 = {
             origin: req.headers[`${version === 8 ? "sec-websocket-origin" : "origin"}`],
             secure: !!(req.socket.authorized || req.socket.encrypted),
             req
           };
           if (this.options.verifyClient.length === 2) {
-            this.options.verifyClient(info, (verified, code, message, headers) => {
+            this.options.verifyClient(info2, (verified, code, message, headers) => {
               if (!verified) {
                 return abortHandshake(socket, code || 401, message, headers);
               }
@@ -12683,7 +12683,7 @@ var require_websocket_server = __commonJS({
             });
             return;
           }
-          if (!this.options.verifyClient(info)) return abortHandshake(socket, 401);
+          if (!this.options.verifyClient(info2)) return abortHandshake(socket, 401);
         }
         this.completeUpgrade(extensions, key, protocols, req, socket, head, cb);
       }
@@ -22497,9 +22497,9 @@ var require_utils3 = __commonJS({
         }
         return;
       }
-      let info = codeCache[controlChars[0]];
-      if (info) {
-        state[info.set] = info.to;
+      let info2 = codeCache[controlChars[0]];
+      if (info2) {
+        state[info2.set] = info2.to;
       }
     }
     function readState(line) {
@@ -23401,7 +23401,7 @@ var require_safe = __commonJS({
 var require_cell = __commonJS({
   "node_modules/cli-table3/src/cell.js"(exports2, module2) {
     "use strict";
-    var { info, debug: debug12 } = require_debug2();
+    var { info: info2, debug: debug12 } = require_debug2();
     var utils = require_utils3();
     var Cell = class _Cell {
       /**
@@ -23518,7 +23518,7 @@ var require_cell = __commonJS({
         if (lineNum == "bottom") return this.drawBottom(this.drawRight);
         let content = utils.truncate(this.content, 10, this.truncate);
         if (!lineNum) {
-          info(`${this.y}-${this.x}: ${this.rowSpan - lineNum}x${this.colSpan} Cell ${content}`);
+          info2(`${this.y}-${this.x}: ${this.rowSpan - lineNum}x${this.colSpan} Cell ${content}`);
         } else {
         }
         let padLen = Math.max(this.height - this.lines.length, 0);
@@ -29714,21 +29714,152 @@ var Conf = class {
 
 // src/config.ts
 var conf = new Conf({
-  projectName: "kuma-cli",
-  schema: {
-    url: { type: "string" },
-    token: { type: "string" }
-  }
+  projectName: "kuma-cli"
 });
-function getConfig() {
-  const url2 = conf.get("url");
-  const token = conf.get("token");
-  if (!url2 || !token) return null;
-  return { url: url2, token };
+function deriveInstanceName(url2) {
+  try {
+    const parsed = new URL(url2);
+    let name = parsed.hostname;
+    if (parsed.port) {
+      name += `-${parsed.port}`;
+    }
+    return name.replace(/[^a-zA-Z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  } catch {
+    return url2.replace(/[^a-zA-Z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  }
 }
-function saveConfig(config) {
-  conf.set("url", config.url);
-  conf.set("token", config.token);
+function migrateConfig(raw) {
+  if (raw.instances && typeof raw.instances === "object") {
+    const instances = raw.instances;
+    if (Object.keys(instances).length > 0) {
+      return raw;
+    }
+    if (raw.url && raw.token) {
+    } else {
+      return raw;
+    }
+  }
+  const legacy = raw;
+  if (legacy.url && legacy.token) {
+    const name = deriveInstanceName(legacy.url);
+    return {
+      instances: {
+        [name]: { url: legacy.url, token: legacy.token }
+      },
+      clusters: {},
+      active: { type: "instance", name }
+    };
+  }
+  return { instances: {}, clusters: {}, active: null };
+}
+function loadConfig() {
+  const raw = conf.store;
+  const migrated = migrateConfig(raw);
+  if (!raw.instances) {
+    conf.store = migrated;
+  }
+  return migrated;
+}
+function saveFullConfig(config) {
+  conf.store = config;
+}
+function getAllInstances() {
+  return loadConfig().instances;
+}
+function getInstanceConfig(name) {
+  const config = loadConfig();
+  return config.instances[name] ?? null;
+}
+function saveInstanceConfig(name, instance) {
+  const config = loadConfig();
+  config.instances[name] = instance;
+  saveFullConfig(config);
+}
+function removeInstanceConfig(name) {
+  const config = loadConfig();
+  if (!config.instances[name]) return false;
+  delete config.instances[name];
+  if (config.active?.type === "instance" && config.active.name === name) {
+    config.active = null;
+  }
+  saveFullConfig(config);
+  return true;
+}
+function clearInstanceToken(name) {
+  const config = loadConfig();
+  if (!config.instances[name]) return false;
+  config.instances[name].token = "";
+  saveFullConfig(config);
+  return true;
+}
+function getInstanceCluster(name) {
+  const config = loadConfig();
+  for (const [clusterName, cluster] of Object.entries(config.clusters)) {
+    if (cluster.instances.includes(name)) return clusterName;
+  }
+  return null;
+}
+function getAllClusters() {
+  return loadConfig().clusters;
+}
+function getClusterConfig(name) {
+  const config = loadConfig();
+  return config.clusters[name] ?? null;
+}
+function saveClusterConfig(name, cluster) {
+  const config = loadConfig();
+  config.clusters[name] = cluster;
+  saveFullConfig(config);
+}
+function removeClusterConfig(name) {
+  const config = loadConfig();
+  if (!config.clusters[name]) return false;
+  delete config.clusters[name];
+  if (config.active?.type === "cluster" && config.active.name === name) {
+    config.active = null;
+  }
+  saveFullConfig(config);
+  return true;
+}
+function getActiveContext() {
+  return loadConfig().active;
+}
+function setActiveContext(ctx) {
+  const config = loadConfig();
+  config.active = ctx;
+  saveFullConfig(config);
+}
+function getConfig() {
+  const config = loadConfig();
+  const active = config.active;
+  if (active) {
+    if (active.type === "instance") {
+      const inst = config.instances[active.name];
+      if (inst && inst.token) return inst;
+      return null;
+    }
+    if (active.type === "cluster") {
+      const cluster = config.clusters[active.name];
+      if (cluster) {
+        const inst = config.instances[cluster.primary];
+        if (inst && inst.token) return inst;
+        return null;
+      }
+    }
+  }
+  const names = Object.keys(config.instances);
+  if (names.length === 1) {
+    const inst = config.instances[names[0]];
+    if (inst && inst.token) return inst;
+    return null;
+  }
+  return null;
+}
+function saveConfig(instanceConfig, alias) {
+  const name = alias ?? deriveInstanceName(instanceConfig.url);
+  saveInstanceConfig(name, instanceConfig);
+  setActiveContext({ type: "instance", name });
+  return name;
 }
 function clearConfig() {
   conf.clear();
@@ -30275,6 +30406,9 @@ function error(msg) {
 function warn(msg) {
   console.warn(source_default.yellow("\u26A0\uFE0F  " + msg));
 }
+function info(msg) {
+  console.log(source_default.blue("\u2139\uFE0F  " + msg));
+}
 function formatUptime(uptime) {
   if (uptime === void 0 || uptime === null) return source_default.gray("\u2014");
   const pct = (uptime * 100).toFixed(1);
@@ -30337,28 +30471,31 @@ function handleError(err, opts) {
   error(message);
   process.exit(code);
 }
-function requireAuth(opts) {
-  const message = "Not authenticated. Run: kuma login <url>";
-  if (isJsonMode(opts)) {
-    jsonError(message, EXIT_CODES.AUTH);
-  }
-  error(message);
-  process.exit(EXIT_CODES.AUTH);
-}
 
 // src/commands/login.ts
 var { prompt } = import_enquirer.default;
 function loginCommand(program3) {
   program3.command("login <url>").description(
     "Authenticate with an Uptime Kuma instance and save the session token locally"
-  ).option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  ).option("--json", "Output as JSON ({ ok, data })").option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma login https://kuma.example.com")}
-  ${source_default.cyan("kuma login https://kuma.example.com --json")}
+  ${source_default.cyan("  Saves as 'kuma-example-com' (auto-derived from hostname)")}
+
+  ${source_default.cyan("kuma login https://kuma.example.com --as my-server")}
+  ${source_default.cyan("  Saves as 'my-server' (custom alias you choose)")}
+
+${source_default.dim("Multi-instance workflow:")}
+  ${source_default.cyan("kuma login https://kuma1.example.com --as server1")}
+  ${source_default.cyan("kuma login https://kuma2.example.com --as server2")}
+  ${source_default.cyan("kuma instances list")}     ${source_default.dim("# See all saved instances")}
+  ${source_default.cyan("kuma use server1")}        ${source_default.dim("# Switch active instance")}
 
 ${source_default.dim("Notes:")}
+  The --as alias is how you reference this instance in other commands
+  (e.g. --instance server1, or when creating clusters).
   Credentials are never stored \u2014 only the session token is saved.
   Token location: run ${source_default.cyan("kuma status")} to see the config path.
 `
@@ -30402,11 +30539,11 @@ ${source_default.dim("Notes:")}
         error(msg);
         process.exit(1);
       }
-      saveConfig({ url: normalizedUrl, token: result.token });
+      const instanceName = saveConfig({ url: normalizedUrl, token: result.token }, opts.as);
       if (json2) {
-        jsonOut({ url: normalizedUrl, username });
+        jsonOut({ url: normalizedUrl, username, instanceName });
       }
-      success(`Logged in as ${username} \u2192 ${normalizedUrl}`);
+      success(`Logged in to ${normalizedUrl} as "${instanceName}"`);
     } catch (err) {
       handleError(err, opts);
     }
@@ -30415,7 +30552,7 @@ ${source_default.dim("Notes:")}
 
 // src/commands/logout.ts
 function logoutCommand(program3) {
-  program3.command("logout").description("Clear the saved session token (you will need to run login again)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  program3.command("logout").description("Clear the saved session token (you will need to run login again)").option("--json", "Output as JSON ({ ok, data })").option("--all", "Logout from all instances and clear all config").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30424,24 +30561,84 @@ ${source_default.dim("Examples:")}
 `
   ).action((opts) => {
     const json2 = isJsonMode(opts);
-    const config = getConfig();
-    if (!config) {
+    if (opts.all) {
+      clearConfig();
       if (json2) {
-        jsonOut({ loggedOut: false, reason: "Not currently logged in" });
+        jsonOut({ loggedOut: true, all: true });
       }
-      warn("Not currently logged in.");
+      success("Logged out from all instances.");
       return;
     }
-    clearConfig();
-    if (json2) {
-      jsonOut({ loggedOut: true });
+    const active = getActiveContext();
+    let instanceName = null;
+    if (active?.type === "instance") {
+      const inst = getInstanceConfig(active.name);
+      if (inst) instanceName = active.name;
+    } else if (active?.type === "cluster") {
     }
-    success("Logged out. Run `kuma login <url>` to authenticate again.");
+    if (!instanceName) {
+      const all = getAllInstances();
+      const names = Object.keys(all);
+      if (names.length === 1) {
+        instanceName = names[0];
+      }
+    }
+    if (!instanceName) {
+      if (json2) {
+        jsonOut({ loggedOut: false, reason: "No active instance" });
+      }
+      error("No active instance. Use --all to logout from all, or: kuma use <name>");
+      return;
+    }
+    clearInstanceToken(instanceName);
+    if (json2) {
+      jsonOut({ loggedOut: true, instanceName });
+    }
+    success(`Logged out from "${instanceName}". Run \`kuma login <url>\` to authenticate again.`);
   });
 }
 
 // src/commands/monitors.ts
 var import_enquirer2 = __toESM(require_enquirer());
+
+// src/instance-manager.ts
+function resolveInstanceName(flags) {
+  if (flags.instance) {
+    const inst = getInstanceConfig(flags.instance);
+    if (!inst) throw new Error(`Instance '${flags.instance}' not found. Run: kuma instances list`);
+    return flags.instance;
+  }
+  if (flags.cluster) {
+    const cluster = getClusterConfig(flags.cluster);
+    if (!cluster) throw new Error(`Cluster '${flags.cluster}' not found. Run: kuma cluster list`);
+    return cluster.primary;
+  }
+  const active = getActiveContext();
+  if (active) {
+    if (active.type === "instance") {
+      const inst = getInstanceConfig(active.name);
+      if (inst) return active.name;
+    }
+    if (active.type === "cluster") {
+      const cluster = getClusterConfig(active.name);
+      if (cluster) return cluster.primary;
+    }
+  }
+  const all = getAllInstances();
+  const names = Object.keys(all);
+  if (names.length === 1) return names[0];
+  if (names.length === 0) throw new Error("No instances configured. Run: kuma login <url>");
+  throw new Error(`No active instance. Multiple instances found: ${names.join(", ")}. Run: kuma use <name>`);
+}
+async function resolveClient(flags) {
+  const name = resolveInstanceName(flags);
+  const config = getInstanceConfig(name);
+  if (!config) throw new Error(`Instance '${name}' not found.`);
+  const client = await createAuthenticatedClient(config.url, config.token);
+  return { client, instanceName: name };
+}
+
+// src/commands/monitors.ts
 var { prompt: prompt2 } = import_enquirer2.default;
 function collect(val, prev) {
   return [...prev, val];
@@ -30482,7 +30679,7 @@ ${source_default.dim("Run")} ${source_default.cyan("kuma monitors <subcommand> -
   monitors.command("list").description("List all monitors with live status, uptime, and ping").option("--json", "Output as JSON ({ ok, data })").option(
     "--status <status>",
     "Filter to a specific status: up, down, pending, maintenance"
-  ).option("--tag <tag>", "Filter to monitors that have this tag name").option("--has-notification", "Filter to monitors that have at least one notification configured").option("--without-notification", "Filter to monitors that have no notifications configured").option("--search <query>", "Filter by monitor name or URL/hostname (case-insensitive)").option("--uptime-below <percent>", "Filter to monitors with 24h uptime below this percentage (e.g. 99.9)").option("--include-notifications", "Include notification channels in the JSON output").addHelpText(
+  ).option("--tag <tag>", "Filter to monitors that have this tag name").option("--has-notification", "Filter to monitors that have at least one notification configured").option("--without-notification", "Filter to monitors that have no notifications configured").option("--search <query>", "Filter by monitor name or URL/hostname (case-insensitive)").option("--uptime-below <percent>", "Filter to monitors with 24h uptime below this percentage (e.g. 99.9)").option("--include-notifications", "Include notification channels in the JSON output").option("--instance <name>", "Target a specific instance").option("--cluster <name>", "Show a unified view across all instances in a named cluster").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30495,8 +30692,83 @@ ${source_default.dim("Examples:")}
 `
   ).action(
     async (opts) => {
-      const config = getConfig();
-      if (!config) requireAuth(opts);
+      if (opts.cluster) {
+        const clusterConfig = getClusterConfig(opts.cluster);
+        if (!clusterConfig) {
+          if (isJsonMode(opts)) return jsonError(`Cluster '${opts.cluster}' not found.`);
+          error(`Cluster '${opts.cluster}' not found.`);
+          process.exit(1);
+        }
+        const allMonitors = [];
+        const results = await Promise.allSettled(
+          clusterConfig.instances.map(async (instanceName) => {
+            const instConfig = getInstanceConfig(instanceName);
+            if (!instConfig) return [];
+            try {
+              const client = await createAuthenticatedClient(instConfig.url, instConfig.token);
+              const monitorMap = await client.getMonitorList();
+              const monitors2 = Object.values(monitorMap);
+              client.disconnect();
+              return monitors2.filter((m) => !m.name.startsWith("[cluster] ")).map((m) => ({ ...m, _instance: instanceName }));
+            } catch {
+              return [];
+            }
+          })
+        );
+        for (const r of results) {
+          if (r.status === "fulfilled") allMonitors.push(...r.value);
+        }
+        const STATUS_PRIORITY = { 0: 0, 3: 1, 2: 2, 1: 3 };
+        const deduped = /* @__PURE__ */ new Map();
+        for (const m of allMonitors) {
+          const key = `${m.name}|${m.type}|${m.url ?? m.hostname ?? ""}`;
+          const existing = deduped.get(key);
+          if (!existing) {
+            deduped.set(key, m);
+          } else {
+            const existingPri = STATUS_PRIORITY[existing.heartbeat?.status ?? 2] ?? 2;
+            const newPri = STATUS_PRIORITY[m.heartbeat?.status ?? 2] ?? 2;
+            if (newPri < existingPri) deduped.set(key, m);
+          }
+        }
+        const clusterMonitors = Array.from(deduped.values());
+        if (isJsonMode(opts)) {
+          return jsonOut({ cluster: opts.cluster, monitors: clusterMonitors });
+        }
+        if (clusterMonitors.length === 0) {
+          info(`Cluster '${opts.cluster}' -- unified view (0 monitors)`);
+          console.log("No monitors found.");
+          return;
+        }
+        const table = createTable([
+          "ID",
+          "Name",
+          "Type",
+          "URL / Host",
+          "Status",
+          "Uptime 24h",
+          "Ping"
+        ]);
+        for (const m of clusterMonitors) {
+          const target = m.url ?? (m.hostname ? `${m.hostname}:${m.port}` : "\u2014");
+          const status = m.heartbeat ? statusLabel(m.heartbeat.status) : m.active ? statusLabel(2) : "\u23F8 Paused";
+          table.push([
+            String(m.id),
+            m.name,
+            m.type,
+            target,
+            status,
+            formatUptime(m.uptime),
+            formatPing(m.heartbeat?.ping)
+          ]);
+        }
+        info(`Cluster '${opts.cluster}' \u2014 unified view (${clusterMonitors.length} monitors, worst-status-wins)
+`);
+        console.log(table.toString());
+        console.log(`
+${clusterMonitors.length} monitor(s) total`);
+        return;
+      }
       const json2 = isJsonMode(opts);
       if (opts.hasNotification && opts.withoutNotification) {
         handleError(new Error("Cannot use both --has-notification and --without-notification"), opts);
@@ -30512,10 +30784,7 @@ ${source_default.dim("Examples:")}
         maintenance: 3
       };
       try {
-        const client = await createAuthenticatedClient(
-          config.url,
-          config.token
-        );
+        const { client } = await resolveClient(opts);
         const monitorMap = await client.getMonitorList();
         client.disconnect();
         let list = Object.values(monitorMap);
@@ -30608,7 +30877,7 @@ ${list.length} monitor(s) total`);
       }
     }
   );
-  monitors.command("add").description("Add a new monitor \u2014 runs interactively if flags are omitted").option("--name <name>", "Display name for the monitor").option("--type <type>", "Monitor type: http, tcp, ping, dns, push, steam, ...").option("--url <url>", "URL (http), hostname:port (tcp), or hostname (ping/dns)").option("--interval <seconds>", "How often to check, in seconds (default: 60)", "60").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("add").description("Add a new monitor \u2014 runs interactively if flags are omitted").option("--name <name>", "Display name for the monitor").option("--type <type>", "Monitor type: http, tcp, ping, dns, push, steam, ...").option("--url <url>", "URL (http), hostname:port (tcp), or hostname (ping/dns)").option("--interval <seconds>", "How often to check, in seconds (default: 60)", "60").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30619,8 +30888,6 @@ ${source_default.dim("Examples:")}
 `
   ).action(
     async (opts) => {
-      const config = getConfig();
-      if (!config) requireAuth(opts);
       const json2 = isJsonMode(opts);
       try {
         const answers = await prompt2([
@@ -30645,10 +30912,7 @@ ${source_default.dim("Examples:")}
         const type2 = opts.type ?? answers.type;
         const url2 = opts.url ?? answers.url;
         const interval = parseInt(opts.interval ?? "60", 10);
-        const client = await createAuthenticatedClient(
-          config.url,
-          config.token
-        );
+        const { client } = await resolveClient(opts);
         const result = await client.addMonitor({ name, type: type2, url: url2, interval });
         client.disconnect();
         if (json2) {
@@ -30660,7 +30924,7 @@ ${source_default.dim("Examples:")}
       }
     }
   );
-  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable \u2014 must already exist in Kuma)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID and pushToken to stdout").addHelpText(
+  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable \u2014 must already exist in Kuma)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID and pushToken to stdout").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30675,15 +30939,13 @@ ${source_default.dim("Full pipeline (deploy \u2192 monitor \u2192 heartbeat):")}
   ${source_default.cyan('kuma heartbeat send $PUSH_TOKEN --msg "Alive"')}
 `
   ).action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     const interval = parseInt(opts.interval ?? "60", 10);
     if (["http", "keyword", "tcp", "ping", "dns"].includes(opts.type) && !opts.url) {
       handleError(new Error(`--url is required for monitor type "${opts.type}"`), opts);
     }
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client, instanceName } = await resolveClient(opts);
       const result = await client.addMonitor({
         name: opts.name,
         type: opts.type,
@@ -30730,8 +30992,9 @@ ${source_default.dim("Full pipeline (deploy \u2192 monitor \u2192 heartbeat):")}
       }
       success(`Monitor "${opts.name}" created (ID: ${monitorId})`);
       if (pushToken) {
+        const instanceUrl = getInstanceConfig(instanceName)?.url ?? "";
         console.log(`   Push token: ${source_default.cyan(pushToken)}`);
-        console.log(`   Push URL:   ${source_default.dim(`${config.url}/api/push/${pushToken}`)}`);
+        console.log(`   Push URL:   ${source_default.dim(`${instanceUrl}/api/push/${pushToken}`)}`);
       }
       if (opts.tag.length > 0) {
         const applied = opts.tag.filter((t) => !tagWarnings.some((w) => w.includes(t)));
@@ -30744,7 +31007,7 @@ ${source_default.dim("Full pipeline (deploy \u2192 monitor \u2192 heartbeat):")}
       handleError(err, opts);
     }
   });
-  monitors.command("update <id>").description("Update the name, URL, interval, or active state of a monitor").option("--name <name>", "Set a new display name").option("--url <url>", "Set a new URL or hostname").option("--interval <seconds>", "Set a new check interval (seconds)").option("--active", "Resume the monitor (mark as active)").option("--no-active", "Pause the monitor (mark as inactive)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("update <id>").description("Update the name, URL, interval, or active state of a monitor").option("--name <name>", "Set a new display name").option("--url <url>", "Set a new URL or hostname").option("--interval <seconds>", "Set a new check interval (seconds)").option("--active", "Resume the monitor (mark as active)").option("--no-active", "Pause the monitor (mark as inactive)").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30756,8 +31019,6 @@ ${source_default.dim("Examples:")}
 `
   ).action(
     async (id, opts) => {
-      const config = getConfig();
-      if (!config) requireAuth(opts);
       const json2 = isJsonMode(opts);
       const monitorId = parseInt(id, 10);
       if (isNaN(monitorId)) {
@@ -30771,10 +31032,7 @@ ${source_default.dim("Examples:")}
         );
       }
       try {
-        const client = await createAuthenticatedClient(
-          config.url,
-          config.token
-        );
+        const { client } = await resolveClient(opts);
         const monitorMap = await client.getMonitorList();
         const existing = monitorMap[String(monitorId)];
         if (!existing) {
@@ -30822,7 +31080,7 @@ ${source_default.dim("Examples:")}
       }
     }
   );
-  monitors.command("delete <id>").description("Permanently delete a monitor and all its history").option("--force", "Skip the confirmation prompt").option("--json", "Output as JSON ({ ok, data }) \u2014 skips confirmation prompt").addHelpText(
+  monitors.command("delete <id>").description("Permanently delete a monitor and all its history").option("--force", "Skip the confirmation prompt").option("--json", "Output as JSON ({ ok, data }) \u2014 skips confirmation prompt").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30833,8 +31091,6 @@ ${source_default.dim("Examples:")}
 ${source_default.dim("Note:")} This action is irreversible. All heartbeat history is deleted.
 `
   ).action(async (id, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     try {
       if (!opts.force && !json2) {
@@ -30849,10 +31105,7 @@ ${source_default.dim("Note:")} This action is irreversible. All heartbeat histor
           return;
         }
       }
-      const client = await createAuthenticatedClient(
-        config.url,
-        config.token
-      );
+      const { client } = await resolveClient(opts);
       await client.deleteMonitor(parseInt(id, 10));
       client.disconnect();
       if (json2) {
@@ -30863,7 +31116,7 @@ ${source_default.dim("Note:")} This action is irreversible. All heartbeat histor
       handleError(err, opts);
     }
   });
-  monitors.command("pause <id>").description("Pause a monitor \u2014 stops checks without deleting it").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("pause <id>").description("Pause a monitor \u2014 stops checks without deleting it").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30871,14 +31124,9 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma monitors pause 42 --json")}
 `
   ).action(async (id, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     try {
-      const client = await createAuthenticatedClient(
-        config.url,
-        config.token
-      );
+      const { client } = await resolveClient(opts);
       await client.pauseMonitor(parseInt(id, 10));
       client.disconnect();
       if (json2) {
@@ -30889,7 +31137,7 @@ ${source_default.dim("Examples:")}
       handleError(err, opts);
     }
   });
-  monitors.command("resume <id>").description("Resume checks for a paused monitor").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("resume <id>").description("Resume checks for a paused monitor").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30897,14 +31145,9 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma monitors resume 42 --json")}
 `
   ).action(async (id, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     try {
-      const client = await createAuthenticatedClient(
-        config.url,
-        config.token
-      );
+      const { client } = await resolveClient(opts);
       await client.resumeMonitor(parseInt(id, 10));
       client.disconnect();
       if (json2) {
@@ -30915,7 +31158,7 @@ ${source_default.dim("Examples:")}
       handleError(err, opts);
     }
   });
-  monitors.command("bulk-pause").description("Pause all monitors matching a tag or status filter").option("--tag <tag>", "Pause all monitors with this tag").option("--status <status>", "Pause all monitors with this status: up, down, pending, maintenance").option("--dry-run", "Preview which monitors would be paused without pausing them").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("bulk-pause").description("Pause all monitors matching a tag or status filter").option("--tag <tag>", "Pause all monitors with this tag").option("--status <status>", "Pause all monitors with this status: up, down, pending, maintenance").option("--dry-run", "Preview which monitors would be paused without pausing them").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30927,15 +31170,13 @@ ${source_default.dim("CI/CD usage:")}
   ${source_default.cyan("kuma monitors bulk-pause --tag Production && ./deploy.sh && kuma monitors bulk-resume --tag Production")}
 `
   ).action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     if (!opts.tag && !opts.status) {
       handleError(new Error("At least one of --tag or --status is required"), opts);
     }
     const STATUS_MAP = { down: 0, up: 1, pending: 2, maintenance: 3 };
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const monitorMap = await client.getMonitorList();
       const all = Object.values(monitorMap);
       let targets = all;
@@ -30982,7 +31223,7 @@ ${source_default.dim("CI/CD usage:")}
       handleError(err, opts);
     }
   });
-  monitors.command("bulk-resume").description("Resume all monitors matching a tag or status filter").option("--tag <tag>", "Resume all monitors with this tag").option("--status <status>", "Resume all monitors with this status: up, down, pending, maintenance").option("--dry-run", "Preview which monitors would be resumed without resuming them").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("bulk-resume").description("Resume all monitors matching a tag or status filter").option("--tag <tag>", "Resume all monitors with this tag").option("--status <status>", "Resume all monitors with this status: up, down, pending, maintenance").option("--dry-run", "Preview which monitors would be resumed without resuming them").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -30991,15 +31232,13 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma monitors bulk-resume --tag Production --json")}
 `
   ).action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     if (!opts.tag && !opts.status) {
       handleError(new Error("At least one of --tag or --status is required"), opts);
     }
     const STATUS_MAP = { down: 0, up: 1, pending: 2, maintenance: 3 };
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const monitorMap = await client.getMonitorList();
       const all = Object.values(monitorMap);
       let targets = all;
@@ -31046,7 +31285,7 @@ ${source_default.dim("Examples:")}
       handleError(err, opts);
     }
   });
-  monitors.command("set-notification <id>").description("Assign or remove a notification channel from a monitor").requiredOption("--notification-id <nid>", "ID of the notification channel to assign").option("--remove", "Remove the notification instead of assigning it").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  monitors.command("set-notification <id>").description("Assign or remove a notification channel from a monitor").requiredOption("--notification-id <nid>", "ID of the notification channel to assign").option("--remove", "Remove the notification instead of assigning it").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31058,8 +31297,6 @@ ${source_default.dim("Bulk assign via pipe:")}
   ${source_default.cyan("kuma monitors list --tag Production --json | jq '.data[].id' | xargs -I{} kuma monitors set-notification {} --notification-id 3")}
 `
   ).action(async (id, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     const monitorId = parseInt(id, 10);
     const notifId = parseInt(opts.notificationId, 10);
@@ -31070,7 +31307,7 @@ ${source_default.dim("Bulk assign via pipe:")}
       handleError(new Error(`Invalid notification ID: ${opts.notificationId}`), opts);
     }
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const monitorMap = await client.getMonitorList();
       await client.setMonitorNotification(
         monitorId,
@@ -31102,7 +31339,7 @@ ${source_default.dim("Subcommands:")}
 ${source_default.dim("Run")} ${source_default.cyan("kuma heartbeat <subcommand> --help")} ${source_default.dim("for examples.")}
 `
   );
-  hb.command("view <monitor-id>").description("View recent heartbeats (check results) for a monitor").option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  hb.command("view <monitor-id>").description("View recent heartbeats (check results) for a monitor").option("--limit <n>", "Maximum number of heartbeats to display (default: 20)", "20").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31112,15 +31349,13 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma heartbeat view 42 --json | jq '.data[] | select(.status == 0)'")}
 `
   ).action(async (monitorId, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     const parsedMonitorId = parseInt(monitorId, 10);
     if (isNaN(parsedMonitorId) || parsedMonitorId <= 0) {
       handleError(new Error(`Invalid monitor ID: "${monitorId}". Must be a positive integer.`), opts);
     }
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const heartbeats = await client.getHeartbeatList(parsedMonitorId);
       client.disconnect();
       const limit = parseInt(opts.limit ?? "20", 10);
@@ -31148,7 +31383,7 @@ Showing last ${recent.length} heartbeat(s)`);
       handleError(err, opts);
     }
   });
-  hb.command("send <push-token>").description("Send a push heartbeat to a Kuma push monitor (for scripts and GitHub Actions)").option("--status <status>", "Heartbeat status: up, down, maintenance (default: up)").option("--msg <message>", "Optional status message").option("--ping <ms>", "Optional response time in milliseconds").option("--url <url>", "Kuma base URL (defaults to saved login URL)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  hb.command("send <push-token>").description("Send a push heartbeat to a Kuma push monitor (for scripts and GitHub Actions)").option("--status <status>", "Heartbeat status: up, down, maintenance (default: up)").option("--msg <message>", "Optional status message").option("--ping <ms>", "Optional response time in milliseconds").option("--url <url>", "Kuma base URL (defaults to saved login URL)").option("--instance <name>", "Target a specific instance").option("--json", "Output as JSON ({ ok, data })").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31187,14 +31422,25 @@ ${source_default.dim("Finding your push token:")}
     }
     let baseUrl = opts.url;
     if (!baseUrl) {
-      const config = getConfig();
-      if (!config) {
-        const msg = "No --url specified and not logged in. Run: kuma login <url> or pass --url";
-        if (json2) jsonError(msg, EXIT_CODES.AUTH);
-        console.error(source_default.red(`\u274C ${msg}`));
-        process.exit(EXIT_CODES.AUTH);
+      if (opts.instance) {
+        const inst = getInstanceConfig(opts.instance);
+        if (!inst) {
+          const msg = `Instance "${opts.instance}" not found. Run: kuma instance list`;
+          if (json2) jsonError(msg, EXIT_CODES.AUTH);
+          console.error(source_default.red(`\u274C ${msg}`));
+          process.exit(EXIT_CODES.AUTH);
+        }
+        baseUrl = inst.url;
+      } else {
+        const config = getConfig();
+        if (!config) {
+          const msg = "No --url specified and not logged in. Run: kuma login <url> or pass --url";
+          if (json2) jsonError(msg, EXIT_CODES.AUTH);
+          console.error(source_default.red(`\u274C ${msg}`));
+          process.exit(EXIT_CODES.AUTH);
+        }
+        baseUrl = config.url;
       }
-      baseUrl = config.url;
     }
     const pushUrl = new URL(`${baseUrl.replace(/\/$/, "")}/api/push/${pushToken}`);
     pushUrl.searchParams.set("status", statusKey);
@@ -31242,7 +31488,7 @@ ${source_default.dim("Subcommands:")}
 ${source_default.dim("Run")} ${source_default.cyan("kuma status-pages <subcommand> --help")} ${source_default.dim("for examples.")}
 `
   );
-  sp.command("list").description("List all status pages with title, slug, and published state").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  sp.command("list").description("List all status pages with title, slug, and published state").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31251,14 +31497,10 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma status-pages list --json | jq '.data[] | select(.published) | .slug'")}
 `
   ).action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     try {
-      const client = await createAuthenticatedClient(
-        config.url,
-        config.token
-      );
+      const { client, instanceName } = await resolveClient(opts);
+      const instanceUrl = getInstanceConfig(instanceName)?.url ?? "";
       const pages = await client.getStatusPageList();
       client.disconnect();
       const list = Object.values(pages);
@@ -31271,7 +31513,7 @@ ${source_default.dim("Examples:")}
       }
       const table = createTable(["ID", "Title", "Slug", "Published", "URL"]);
       list.forEach((page) => {
-        const url2 = `${config.url}/status/${page.slug}`;
+        const url2 = `${instanceUrl}/status/${page.slug}`;
         table.push([
           String(page.id),
           page.title,
@@ -31311,7 +31553,7 @@ function readCurrentVersion() {
 async function fetchLatestRelease() {
   try {
     const res = await fetch(
-      "https://api.github.com/repos/BlackAsteroid/kuma-cli/releases/latest",
+      "https://api.github.com/repos/pablofmorales/kuma-cli/releases/latest",
       {
         headers: {
           "User-Agent": "kuma-cli-upgrade",
@@ -31448,7 +31690,7 @@ ${source_default.dim("Subcommands:")}
 ${source_default.dim("Run")} ${source_default.cyan("kuma notifications <subcommand> --help")} ${source_default.dim("for examples.")}
 `
   );
-  notifications.command("list").description("List all configured notification channels with their IDs and types").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  notifications.command("list").description("List all configured notification channels with their IDs and types").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31457,11 +31699,9 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma notifications list --json | jq '.data[] | {id, name}'")}
 `
   ).action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const list = await client.getNotificationList();
       client.disconnect();
       if (json2) {
@@ -31502,7 +31742,7 @@ ${list.length} notification channel(s)`);
       handleError(err, opts);
     }
   });
-  notifications.command("create").description("Create a new notification channel").requiredOption("--type <type>", "Notification type: discord, telegram, slack, webhook, ...").requiredOption("--name <name>", "Friendly name for this notification channel").option("--discord-webhook <url|$VAR>", "Discord webhook URL \u2014 pass value or env var name like '$DISCORD_WEBHOOK'").option("--discord-username <name>", "Discord bot display name (optional)").option("--telegram-token <token|$VAR>", "Telegram bot token \u2014 pass value or env var name like '$TELEGRAM_TOKEN'").option("--telegram-chat-id <id>", "Telegram chat ID (required for --type telegram)").option("--slack-webhook <url|$VAR>", "Slack webhook URL \u2014 pass value or env var name like '$SLACK_WEBHOOK'").option("--webhook-url <url|$VAR>", "Webhook URL \u2014 pass value or env var name like '$WEBHOOK_URL'").option("--webhook-content-type <type>", "Webhook content type (default: application/json)", "application/json").option("--default", "Enable this notification by default on all new monitors").option("--apply-existing", "Apply this notification to all existing monitors immediately").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  notifications.command("create").description("Create a new notification channel").requiredOption("--type <type>", "Notification type: discord, telegram, slack, webhook, ...").requiredOption("--name <name>", "Friendly name for this notification channel").option("--discord-webhook <url|$VAR>", "Discord webhook URL \u2014 pass value or env var name like '$DISCORD_WEBHOOK'").option("--discord-username <name>", "Discord bot display name (optional)").option("--telegram-token <token|$VAR>", "Telegram bot token \u2014 pass value or env var name like '$TELEGRAM_TOKEN'").option("--telegram-chat-id <id>", "Telegram chat ID (required for --type telegram)").option("--slack-webhook <url|$VAR>", "Slack webhook URL \u2014 pass value or env var name like '$SLACK_WEBHOOK'").option("--webhook-url <url|$VAR>", "Webhook URL \u2014 pass value or env var name like '$WEBHOOK_URL'").option("--webhook-content-type <type>", "Webhook content type (default: application/json)", "application/json").option("--default", "Enable this notification by default on all new monitors").option("--apply-existing", "Apply this notification to all existing monitors immediately").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31520,8 +31760,6 @@ ${source_default.dim("Supported types:")}
   (full list at https://uptime.kuma.pet/docs)
 `
   ).action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     const payload = {
       name: opts.name,
@@ -31571,7 +31809,7 @@ ${source_default.dim("Supported types:")}
         }
     }
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const id = await client.addNotification(payload);
       client.disconnect();
       if (json2) {
@@ -31582,7 +31820,7 @@ ${source_default.dim("Supported types:")}
       handleError(err, opts);
     }
   });
-  notifications.command("delete <id>").description("Permanently delete a notification channel").option("--force", "Skip the confirmation prompt").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  notifications.command("delete <id>").description("Permanently delete a notification channel").option("--force", "Skip the confirmation prompt").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").addHelpText(
     "after",
     `
 ${source_default.dim("Examples:")}
@@ -31591,8 +31829,6 @@ ${source_default.dim("Examples:")}
   ${source_default.cyan("kuma notifications delete 3 --json")}
 `
   ).action(async (id, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
     const json2 = isJsonMode(opts);
     const notifId = parseInt(id, 10);
     if (isNaN(notifId) || notifId <= 0) {
@@ -31613,7 +31849,7 @@ ${source_default.dim("Examples:")}
       }
     }
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       await client.deleteNotification(notifId);
       client.disconnect();
       if (json2) {
@@ -34254,14 +34490,20 @@ var jsYaml = {
 };
 
 // src/commands/config.ts
+var FORBIDDEN_NOTIFICATION_FIELDS = /* @__PURE__ */ new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+  // Kuma internal columns that shouldn't be overridden via config blob
+  "id",
+  "user_id"
+]);
 function configCommand(program3) {
   const cfg = program3.command("config").description("Export and import Kuma configuration");
-  cfg.command("export").description("Export monitors and notifications to a file").option("--tag <tag>", "Export only monitors with this tag").option("--output <file>", "Output file path (JSON or YAML) or '-' for stdout", "-").option("--json", "Output as JSON ({ ok, data })").action(async (opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
+  cfg.command("export").description("Export monitors and notifications to a file").option("--tag <tag>", "Export only monitors with this tag").option("--output <file>", "Output file path (JSON or YAML) or '-' for stdout", "-").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").action(async (opts) => {
     const json2 = isJsonMode(opts);
     try {
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const monitorMap = await client.getMonitorList();
       const allMonitors = Object.values(monitorMap);
       const allNotifications = await client.getNotificationList();
@@ -34328,9 +34570,7 @@ function configCommand(program3) {
       handleError(err, opts);
     }
   });
-  cfg.command("import <file>").description("Import monitors and notifications from an export file").option("--on-conflict <action>", "What to do if monitor exists by name: skip, update", "skip").option("--dry-run", "Preview what would be created/updated without saving").option("--json", "Output as JSON ({ ok, data })").action(async (file, opts) => {
-    const config = getConfig();
-    if (!config) requireAuth(opts);
+  cfg.command("import <file>").description("Import monitors and notifications from an export file").option("--on-conflict <action>", "What to do if monitor exists by name: skip, update", "skip").option("--dry-run", "Preview what would be created/updated without saving").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").action(async (file, opts) => {
     const json2 = isJsonMode(opts);
     try {
       const raw = (0, import_fs2.readFileSync)(file, "utf8");
@@ -34343,7 +34583,7 @@ function configCommand(program3) {
       if (data.version !== "1" || !Array.isArray(data.monitors)) {
         throw new Error("Invalid export file format");
       }
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const { client } = await resolveClient(opts);
       const existingMonitors = Object.values(await client.getMonitorList());
       const existingMap = new Map(existingMonitors.map((m) => [m.name, m]));
       let createdCount = 0;
@@ -34385,7 +34625,15 @@ function configCommand(program3) {
                 parsedConfig = JSON.parse(n.config);
               } catch {
               }
-              await client.addNotification({ ...parsedConfig, name: n.name, type: parsedConfig.type || n.type }, existing.id);
+              const safeConfig = {};
+              for (const [k, v] of Object.entries(parsedConfig)) {
+                if (FORBIDDEN_NOTIFICATION_FIELDS.has(k) || k.startsWith("__")) {
+                  if (!json2) console.warn(source_default.yellow(`\u26A0\uFE0F  Ignored forbidden notification field: ${k}`));
+                } else {
+                  safeConfig[k] = v;
+                }
+              }
+              await client.addNotification({ ...safeConfig, name: n.name, type: safeConfig.type || n.type }, existing.id);
             }
           } else {
             skippedNotifCount++;
@@ -34398,7 +34646,15 @@ function configCommand(program3) {
               parsedConfig = JSON.parse(n.config);
             } catch {
             }
-            await client.addNotification({ ...parsedConfig, name: n.name, type: parsedConfig.type || n.type });
+            const safeConfig = {};
+            for (const [k, v] of Object.entries(parsedConfig)) {
+              if (FORBIDDEN_NOTIFICATION_FIELDS.has(k) || k.startsWith("__")) {
+                if (!json2) console.warn(source_default.yellow(`\u26A0\uFE0F  Ignored forbidden notification field: ${k}`));
+              } else {
+                safeConfig[k] = v;
+              }
+            }
+            await client.addNotification({ ...safeConfig, name: n.name, type: safeConfig.type || n.type });
           }
         }
       }
@@ -34425,6 +34681,464 @@ function configCommand(program3) {
       console.log(`  Skipped: ${skippedNotifCount}`);
     } catch (err) {
       handleError(err, opts);
+    }
+  });
+}
+
+// src/commands/instances.ts
+function instancesCommand(program3) {
+  const instances = program3.command("instances").description("Manage saved Uptime Kuma instances (added via kuma login --as <alias>)");
+  instances.command("list").description("List all saved instances and their aliases").option("--json", "Output as JSON").action((opts) => {
+    const all = getAllInstances();
+    const active = getActiveContext();
+    const names = Object.keys(all);
+    if (names.length === 0) {
+      if (isJsonMode(opts)) return jsonOut({ instances: [] });
+      warn("No instances configured. Run: kuma login <url>");
+      return;
+    }
+    if (isJsonMode(opts)) {
+      const data = names.map((name) => ({
+        name,
+        url: all[name].url,
+        active: active?.type === "instance" && active.name === name,
+        token: all[name].token.slice(0, 4) + "..." + all[name].token.slice(-4)
+      }));
+      return jsonOut({ instances: data });
+    }
+    const table = createTable(["", "Name", "URL", "Token"]);
+    for (const name of names) {
+      const isActive = active?.type === "instance" && active.name === name;
+      table.push([
+        isActive ? "\u2192" : "",
+        name,
+        all[name].url,
+        all[name].token.slice(0, 4) + "..." + all[name].token.slice(-4)
+      ]);
+    }
+    console.log(table.toString());
+  });
+  instances.command("remove <name>").description("Remove a saved instance by its alias").option("--force", "Skip confirmation").option("--json", "Output as JSON").action(async (name, opts) => {
+    const clusterName = getInstanceCluster(name);
+    if (clusterName) {
+      const msg = `Instance '${name}' belongs to cluster '${clusterName}'. Remove it from the cluster first.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    if (!opts.force && !isJsonMode(opts)) {
+      const enquirer3 = await Promise.resolve().then(() => __toESM(require_enquirer()));
+      const { prompt: prompt3 } = enquirer3.default;
+      const { confirm } = await prompt3({
+        type: "confirm",
+        name: "confirm",
+        message: `Remove instance '${name}'?`,
+        initial: false
+      });
+      if (!confirm) return;
+    }
+    const removed = removeInstanceConfig(name);
+    if (!removed) {
+      const msg = `Instance '${name}' not found.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    if (isJsonMode(opts)) return jsonOut({ removed: name });
+    success(`Removed instance '${name}'`);
+  });
+}
+
+// src/commands/use.ts
+function useCommand(program3) {
+  program3.command("use [name]").description("Switch the active instance or cluster (affects all subsequent commands)").option("--cluster <name>", "Set a cluster as active context (commands default to its primary instance)").option("--json", "Output as JSON").addHelpText(
+    "after",
+    `
+${source_default.dim("Arguments:")}
+  ${source_default.cyan("[name]")}  The alias of an instance (as set with ${source_default.cyan("kuma login --as <alias>")})
+
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma use server1")}                  ${source_default.dim("# Switch to instance 'server1'")}
+  ${source_default.cyan("kuma use --cluster my-cluster")}     ${source_default.dim("# Switch to cluster (uses its primary)")}
+  ${source_default.cyan("kuma instances list")}               ${source_default.dim("# See available instance aliases")}
+  ${source_default.cyan("kuma cluster list")}                 ${source_default.dim("# See available cluster names")}
+
+${source_default.dim("Once active, all commands target that instance unless overridden with --instance or --cluster.")}
+`
+  ).action((name, opts) => {
+    if (opts.cluster) {
+      const cluster = getClusterConfig(opts.cluster);
+      if (!cluster) {
+        const all = Object.keys(getAllClusters());
+        const msg = all.length ? `Cluster '${opts.cluster}' not found. Available: ${all.join(", ")}` : `Cluster '${opts.cluster}' not found. No clusters configured.`;
+        if (isJsonMode(opts)) return jsonError(msg);
+        error(msg);
+        process.exit(1);
+      }
+      setActiveContext({ type: "cluster", name: opts.cluster });
+      if (isJsonMode(opts)) return jsonOut({ active: { type: "cluster", name: opts.cluster, primary: cluster.primary } });
+      success(`Active context: cluster '${opts.cluster}' (primary: ${cluster.primary})`);
+      return;
+    }
+    if (!name) {
+      const msg = "Specify an instance name. Run: kuma instances list";
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    const inst = getInstanceConfig(name);
+    if (!inst) {
+      const all = Object.keys(getAllInstances());
+      const msg = all.length ? `Instance '${name}' not found. Available: ${all.join(", ")}` : `Instance '${name}' not found. No instances configured.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    setActiveContext({ type: "instance", name });
+    if (isJsonMode(opts)) return jsonOut({ active: { type: "instance", name } });
+    success(`Active instance: '${name}' (${inst.url})`);
+  });
+}
+
+// src/commands/cluster.ts
+function clusterCommand(program3) {
+  const cluster = program3.command("cluster").description("Manage clusters of Uptime Kuma instances for high availability");
+  cluster.command("create <name>").description("Create a cluster from existing instances").requiredOption("--instances <names>", "Comma-separated instance aliases (from kuma login --as)").requiredOption("--primary <name>", "Instance alias to use as the primary (source of truth)").option("--json", "Output as JSON").addHelpText(
+    "after",
+    `
+${source_default.dim("Arguments:")}
+  ${source_default.cyan("<name>")}  Any label you choose for this cluster (e.g. "ha-group", "prod-backup")
+
+${source_default.dim("How it works:")}
+  1. First, login to each Uptime Kuma server and give it an alias:
+     ${source_default.cyan("kuma login https://kuma1.example.com --as server1")}
+     ${source_default.cyan("kuma login https://kuma2.example.com --as server2")}
+
+  2. Then create a cluster using those aliases:
+     ${source_default.cyan("kuma cluster create my-cluster --instances server1,server2 --primary server1")}
+
+  3. Sync the primary's monitors to all secondaries:
+     ${source_default.cyan("kuma cluster sync my-cluster")}
+
+${source_default.dim("The --primary is the source of truth \u2014 its monitors and notifications")}
+${source_default.dim("will be replicated to the other instances during sync.")}
+`
+  ).action((name, opts) => {
+    const instanceNames = opts.instances.split(",").map((s) => s.trim());
+    for (const inst of instanceNames) {
+      if (!getInstanceConfig(inst)) {
+        const msg = `Instance '${inst}' not found. Run: kuma instances list`;
+        if (isJsonMode(opts)) return jsonError(msg);
+        error(msg);
+        process.exit(1);
+      }
+    }
+    if (!instanceNames.includes(opts.primary)) {
+      const msg = `Primary '${opts.primary}' must be one of: ${instanceNames.join(", ")}`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    if (instanceNames.length < 2) {
+      const msg = "A cluster requires at least 2 instances.";
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    if (getClusterConfig(name)) {
+      const msg = `Cluster '${name}' already exists. Remove it first: kuma cluster remove ${name}`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    saveClusterConfig(name, { instances: instanceNames, primary: opts.primary });
+    if (isJsonMode(opts)) return jsonOut({ cluster: name, instances: instanceNames, primary: opts.primary });
+    success(`Cluster '${name}' created with instances: ${instanceNames.join(", ")} (primary: ${opts.primary})`);
+  });
+  cluster.command("list").description("List all clusters").option("--json", "Output as JSON").action((opts) => {
+    const all = getAllClusters();
+    const names = Object.keys(all);
+    if (names.length === 0) {
+      if (isJsonMode(opts)) return jsonOut({ clusters: [] });
+      warn("No clusters configured. Run: kuma cluster create <name> --instances a,b --primary a");
+      return;
+    }
+    if (isJsonMode(opts)) {
+      return jsonOut({ clusters: names.map((n) => ({ name: n, ...all[n] })) });
+    }
+    const table = createTable(["Name", "Instances", "Primary"]);
+    for (const n of names) {
+      table.push([n, all[n].instances.join(", "), all[n].primary]);
+    }
+    console.log(table.toString());
+  });
+  cluster.command("remove <name>").description("Remove a cluster definition (does not delete instances or health monitors)").option("--force", "Skip confirmation").option("--json", "Output as JSON").action(async (name, opts) => {
+    if (!getClusterConfig(name)) {
+      const msg = `Cluster '${name}' not found.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    if (!opts.force && !isJsonMode(opts)) {
+      const enquirer3 = await Promise.resolve().then(() => __toESM(require_enquirer()));
+      const { prompt: prompt3 } = enquirer3.default;
+      const { confirm } = await prompt3({
+        type: "confirm",
+        name: "confirm",
+        message: `Remove cluster '${name}'? (instances and health monitors will not be deleted)`,
+        initial: false
+      });
+      if (!confirm) return;
+    }
+    removeClusterConfig(name);
+    if (isJsonMode(opts)) return jsonOut({ removed: name });
+    success(`Removed cluster '${name}'`);
+  });
+  cluster.command("info <name>").description("Show cluster details with live instance status").option("--json", "Output as JSON").action(async (name, opts) => {
+    const clusterConfig = getClusterConfig(name);
+    if (!clusterConfig) {
+      const msg = `Cluster '${name}' not found.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    if (!isJsonMode(opts)) info(`Cluster: ${name}
+`);
+    const results = await Promise.allSettled(
+      clusterConfig.instances.map(async (instanceName) => {
+        const config = getInstanceConfig(instanceName);
+        if (!config) return { instanceName, reachable: false, error: "Not configured", monitors: 0, healthMonitors: [] };
+        try {
+          const client = await createAuthenticatedClient(config.url, config.token);
+          const monitorMap = await client.getMonitorList();
+          const monitors = Object.values(monitorMap);
+          const healthMonitors = monitors.filter((m) => m.name.startsWith("[cluster] "));
+          client.disconnect();
+          return {
+            instanceName,
+            reachable: true,
+            monitors: monitors.length - healthMonitors.length,
+            healthMonitors: healthMonitors.map((m) => ({ name: m.name, status: m.heartbeat?.status }))
+          };
+        } catch (err) {
+          return {
+            instanceName,
+            reachable: false,
+            error: err instanceof Error ? err.message : String(err),
+            monitors: 0,
+            healthMonitors: []
+          };
+        }
+      })
+    );
+    const instanceData = results.map(
+      (r) => r.status === "fulfilled" ? r.value : { instanceName: "unknown", reachable: false, error: "Connection failed", monitors: 0, healthMonitors: [] }
+    );
+    if (isJsonMode(opts)) return jsonOut({ cluster: name, primary: clusterConfig.primary, instances: instanceData });
+    const table = createTable(["", "Instance", "URL", "Reachable", "Monitors", "Health Monitors"]);
+    for (const inst of instanceData) {
+      const config = getInstanceConfig(inst.instanceName);
+      const isPrimary = inst.instanceName === clusterConfig.primary;
+      const healthStr = inst.healthMonitors.length ? inst.healthMonitors.map((h) => `${h.name}: ${statusLabel(h.status ?? 2)}`).join(", ") : isPrimary ? "\u2014" : "none";
+      table.push([
+        isPrimary ? "\u2192" : "",
+        inst.instanceName,
+        config?.url ?? "N/A",
+        inst.reachable ? "yes" : `no (${inst.error ?? "unknown"})`,
+        String(inst.monitors),
+        healthStr
+      ]);
+    }
+    console.log(table.toString());
+  });
+  cluster.command("sync <name>").description("Sync monitors and notifications from the primary instance to all secondaries").option("--dry-run", "Show what would be synced without making changes").option("--json", "Output as JSON").addHelpText(
+    "after",
+    `
+${source_default.dim("Arguments:")}
+  ${source_default.cyan("<name>")}  The cluster name (as created with ${source_default.cyan("kuma cluster create")})
+
+${source_default.dim("What gets synced:")}
+  1. ${source_default.bold("Monitors")} from the primary are replicated to each secondary.
+     Existing monitors (matched by name + type + URL) are skipped.
+  2. ${source_default.bold("Health monitors")} are created so each instance checks the others.
+  3. ${source_default.bold("Notifications")} are copied to secondaries but ${source_default.yellow("kept disabled")}
+     to avoid duplicate alerts. The primary owns active notifications.
+
+${source_default.dim("Examples:")}
+  ${source_default.cyan("kuma cluster sync my-cluster --dry-run")}   ${source_default.dim("# Preview without changes")}
+  ${source_default.cyan("kuma cluster sync my-cluster")}             ${source_default.dim("# Run the actual sync")}
+
+${source_default.dim("Sync is idempotent \u2014 safe to run multiple times.")}
+`
+  ).action(async (name, opts) => {
+    const clusterConfig = getClusterConfig(name);
+    if (!clusterConfig) {
+      const msg = `Cluster '${name}' not found.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    const primaryConfig = getInstanceConfig(clusterConfig.primary);
+    if (!primaryConfig) {
+      const msg = `Primary instance '${clusterConfig.primary}' not configured.`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    let primaryClient;
+    try {
+      primaryClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token);
+    } catch (err) {
+      const msg = `Cannot connect to primary '${clusterConfig.primary}': ${err instanceof Error ? err.message : err}`;
+      if (isJsonMode(opts)) return jsonError(msg);
+      error(msg);
+      process.exit(1);
+    }
+    const secondaries = clusterConfig.instances.filter((i) => i !== clusterConfig.primary);
+    const secClients = {};
+    for (const secName of secondaries) {
+      const secConfig = getInstanceConfig(secName);
+      if (!secConfig) {
+        if (!isJsonMode(opts)) warn(`Skipping '${secName}': not configured`);
+        continue;
+      }
+      try {
+        secClients[secName] = await createAuthenticatedClient(secConfig.url, secConfig.token);
+      } catch (err) {
+        if (!isJsonMode(opts)) warn(`Skipping '${secName}': ${err instanceof Error ? err.message : err}`);
+        continue;
+      }
+    }
+    try {
+      const primaryMonitorMap = await primaryClient.getMonitorList();
+      const primaryMonitors = Object.values(primaryMonitorMap);
+      const monitorsToSync = primaryMonitors.filter(
+        (m) => !m.name.startsWith("[cluster] ")
+      );
+      if (!isJsonMode(opts)) {
+        info(`Syncing cluster '${name}' (primary: ${clusterConfig.primary})`);
+        info(`Monitors to sync: ${monitorsToSync.length}`);
+      }
+      const syncResults = {};
+      for (const secName of secondaries) {
+        if (!secClients[secName]) {
+          syncResults[secName] = { created: 0, skipped: 0, failed: monitorsToSync.length };
+          continue;
+        }
+        const secClient = secClients[secName];
+        const secMonitorMap = await secClient.getMonitorList();
+        const secMonitors = Object.values(secMonitorMap);
+        let created = 0, skipped = 0, failed = 0;
+        for (const monitor of monitorsToSync) {
+          const exists = secMonitors.some(
+            (m) => m.name === monitor.name && m.type === monitor.type && (m.url === monitor.url || m.hostname === monitor.hostname)
+          );
+          if (exists) {
+            skipped++;
+            continue;
+          }
+          if (opts.dryRun) {
+            created++;
+            if (!isJsonMode(opts)) info(`  [dry-run] Would create: ${monitor.name} (${monitor.type})`);
+            continue;
+          }
+          try {
+            const { id, heartbeat, uptime, active, tags, notificationIDList, ...monitorData } = monitor;
+            await secClient.addMonitor(monitorData);
+            created++;
+          } catch (err) {
+            failed++;
+            if (!isJsonMode(opts)) warn(`  Failed to create '${monitor.name}' on ${secName}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+        syncResults[secName] = { created, skipped, failed };
+      }
+      let healthCreated = 0, healthSkipped = 0;
+      for (const instanceName of clusterConfig.instances) {
+        const client = instanceName === clusterConfig.primary ? primaryClient : secClients[instanceName];
+        if (!client) continue;
+        const monitorMap = await client.getMonitorList();
+        const monitors = Object.values(monitorMap);
+        const otherInstances = clusterConfig.instances.filter((i) => i !== instanceName);
+        for (const otherName of otherInstances) {
+          const otherConfig = getInstanceConfig(otherName);
+          if (!otherConfig) continue;
+          const exists = monitors.some((m) => m.url === otherConfig.url || m.url === otherConfig.url + "/");
+          if (exists) {
+            healthSkipped++;
+            continue;
+          }
+          if (opts.dryRun) {
+            healthCreated++;
+            if (!isJsonMode(opts)) info(`  [dry-run] Would create health monitor: ${instanceName} -> ${otherName}`);
+            continue;
+          }
+          try {
+            await client.addMonitor({
+              name: `[cluster] ${otherName}`,
+              type: "http",
+              url: otherConfig.url,
+              interval: 60
+            });
+            healthCreated++;
+          } catch (err) {
+            if (!isJsonMode(opts)) warn(`  Failed to create health monitor on ${instanceName} -> ${otherName}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+      }
+      const primaryNotifications = await primaryClient.getNotificationList();
+      let notifSynced = 0, notifSkipped = 0;
+      for (const secName of secondaries) {
+        const secClient = secClients[secName];
+        if (!secClient) continue;
+        const secNotifications = await secClient.getNotificationList();
+        for (const notif of primaryNotifications) {
+          const exists = secNotifications.some((n) => n.name === notif.name);
+          if (exists) {
+            notifSkipped++;
+            continue;
+          }
+          if (opts.dryRun) {
+            notifSynced++;
+            if (!isJsonMode(opts)) info(`  [dry-run] Would sync notification: ${notif.name} (disabled)`);
+            continue;
+          }
+          try {
+            const config = typeof notif.config === "string" ? JSON.parse(notif.config) : notif.config;
+            await secClient.addNotification({
+              ...config,
+              name: notif.name,
+              active: false,
+              isDefault: false
+            });
+            notifSynced++;
+          } catch (err) {
+            if (!isJsonMode(opts)) warn(`  Failed to sync notification '${notif.name}' to ${secName}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+      }
+      if (isJsonMode(opts)) {
+        return jsonOut({
+          cluster: name,
+          dryRun: opts.dryRun ?? false,
+          monitors: syncResults,
+          health: { created: healthCreated, skipped: healthSkipped },
+          notifications: { synced: notifSynced, skipped: notifSkipped }
+        });
+      }
+      console.log("");
+      for (const [secName, result] of Object.entries(syncResults)) {
+        info(`${clusterConfig.primary} \u2192 ${secName}: ${result.created} created, ${result.skipped} skipped, ${result.failed} failed`);
+      }
+      info(`Health monitors: ${healthCreated} created, ${healthSkipped} skipped`);
+      info(`Notifications: ${notifSynced} synced (disabled on secondaries), ${notifSkipped} skipped`);
+      if (opts.dryRun) warn("Dry run \u2014 no changes were made.");
+      else success("Sync complete.");
+    } finally {
+      primaryClient.disconnect();
+      for (const client of Object.values(secClients)) {
+        client.disconnect();
+      }
     }
   });
 }
@@ -34459,6 +35173,20 @@ ${source_default.bold("Exit codes:")}
   ${source_default.yellow("3")}  Not found
   ${source_default.yellow("4")}  Auth error (session expired \u2014 run ${source_default.cyan("kuma login")} again)
 
+${source_default.bold("Multi-Instance:")}
+  ${source_default.cyan("kuma login https://kuma1.example.com --as server1")}   Save as named instance
+  ${source_default.cyan("kuma login https://kuma2.example.com --as server2")}   Save another instance
+  ${source_default.cyan("kuma instances list")}                                 List all saved instances
+  ${source_default.cyan("kuma use server1")}                                    Switch active instance
+
+${source_default.bold("Clusters:")}
+  ${source_default.dim("# Create a cluster (name is any label, --instances are login aliases)")}
+  ${source_default.cyan("kuma cluster create my-cluster --instances server1,server2 --primary server1")}
+  ${source_default.cyan("kuma cluster sync my-cluster")}              Sync monitors across cluster
+  ${source_default.cyan("kuma cluster info my-cluster")}              Show cluster details
+  ${source_default.cyan("kuma monitors list --cluster my-cluster")}   Unified view across cluster
+  ${source_default.cyan("kuma monitors list --instance server2")}     Target a specific instance
+
 ${source_default.dim("Config stored at:")} ${source_default.yellow(getConfigPath())}
 `
 );
@@ -34471,27 +35199,58 @@ ${source_default.dim("Examples:")}
 `
 ).action((opts) => {
   const json2 = isJsonMode(opts);
-  const config = getConfig();
-  if (!config) {
-    if (json2) {
-      jsonOut({ loggedIn: false });
-    }
+  const active = getActiveContext();
+  const instances = getAllInstances();
+  const clusters = getAllClusters();
+  const instanceCount = Object.keys(instances).length;
+  const clusterCount = Object.keys(clusters).length;
+  const configPath = getConfigPath();
+  if (json2) {
+    const config = getConfig();
+    return jsonOut({
+      loggedIn: !!config,
+      active: active ?? void 0,
+      url: config?.url,
+      instanceCount,
+      clusterCount,
+      configPath
+    });
+  }
+  if (!active && instanceCount === 0) {
     console.log(source_default.yellow("Not logged in. Run: kuma login <url>"));
     return;
   }
-  if (json2) {
-    jsonOut({
-      loggedIn: true,
-      url: config.url,
-      configPath: getConfigPath()
-    });
+  if (active?.type === "instance") {
+    const inst = getInstanceConfig(active.name);
+    if (inst) {
+      console.log(source_default.green(`Active: ${active.name}`) + ` (${source_default.cyan(inst.url)})`);
+      const clusterName = getInstanceCluster(active.name);
+      if (clusterName) {
+        console.log(`         Member of cluster: ${source_default.magenta(clusterName)}`);
+      }
+    } else {
+      console.log(source_default.yellow(`Active instance '${active.name}' not found in config.`));
+    }
+  } else if (active?.type === "cluster") {
+    const cluster = clusters[active.name];
+    if (cluster) {
+      const primaryInst = getInstanceConfig(cluster.primary);
+      const primaryUrl = primaryInst ? ` (${source_default.cyan(primaryInst.url)})` : "";
+      console.log(source_default.green(`Active: cluster '${active.name}'`) + ` primary: ${cluster.primary}${primaryUrl}`);
+    } else {
+      console.log(source_default.yellow(`Active cluster '${active.name}' not found in config.`));
+    }
+  } else if (instanceCount === 1) {
+    const name = Object.keys(instances)[0];
+    const inst = instances[name];
+    console.log(source_default.green(`Active: ${name}`) + ` (${source_default.cyan(inst.url)})`);
+  } else {
+    console.log(source_default.yellow("No active context set. Run: kuma use <instance>"));
   }
-  console.log(source_default.green("\u2705 Logged in"));
-  console.log(`   URL:    ${source_default.cyan(config.url)}`);
-  console.log(
-    `   Token:  ${source_default.dim(config.token.slice(0, 8) + "..." + config.token.slice(-4))}`
-  );
-  console.log(`   Config: ${source_default.dim(getConfigPath())}`);
+  console.log();
+  console.log(`Instances: ${source_default.bold(String(instanceCount))}`);
+  console.log(`Clusters:  ${source_default.bold(String(clusterCount))}`);
+  console.log(`Config:    ${source_default.dim(configPath)}`);
 });
 loginCommand(program2);
 logoutCommand(program2);
@@ -34501,6 +35260,9 @@ statusPagesCommand(program2);
 upgradeCommand(program2);
 notificationsCommand(program2);
 configCommand(program2);
+instancesCommand(program2);
+useCommand(program2);
+clusterCommand(program2);
 program2.parse(process.argv);
 /*! Bundled license information:
 

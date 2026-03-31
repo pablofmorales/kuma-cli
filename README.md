@@ -2,14 +2,14 @@
 
 > CLI for managing [Uptime Kuma](https://github.com/louislam/uptime-kuma) via its native Socket.IO API. No more clicking through the web panel — manage monitors, status pages, and heartbeats from your terminal.
 
-[![kuma-cli demo](.github/assets/demo.gif)](https://github.com/BlackAsteroid/kuma-cli/releases/latest/download/demo.mp4)
+[![kuma-cli demo](.github/assets/demo.gif)](https://github.com/pablofmorales/kuma-cli/releases/latest/download/demo.mp4)
 
 ## Install
 
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap BlackAsteroid/tap
+brew tap pablofmorales/tap
 brew install kuma-cli
 ```
 
@@ -309,7 +309,7 @@ kuma *      → socket.emit("loginByToken")  → authenticated session
 ## Development
 
 ```bash
-git clone https://github.com/BlackAsteroid/kuma-cli
+git clone https://github.com/pablofmorales/kuma-cli
 cd kuma-cli
 npm install
 npm run dev        # watch mode (tsup)

@@ -59,7 +59,7 @@ jobs:
           echo "SHA256: $SHA256"
 
           # Clone the tap repo
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/BlackAsteroid/homebrew-tap.git" /tmp/homebrew-tap
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/pablofmorales/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
 
           git config user.email "dante@blackasteroid.com.ar"
@@ -69,7 +69,7 @@ jobs:
           cat > Formula/kuma-cli.rb << FORMULA
           class KumaCli < Formula
             desc "CLI for managing Uptime Kuma via its native Socket.IO API"
-            homepage "https://github.com/BlackAsteroid/kuma-cli"
+            homepage "https://github.com/pablofmorales/kuma-cli"
             url "https://registry.npmjs.org/@blackasteroid/kuma-cli/-/kuma-cli-${NEW_VERSION}.tgz"
             sha256 "${SHA256}"
             license "MIT"
