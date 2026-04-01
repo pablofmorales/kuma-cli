@@ -375,7 +375,7 @@ ${chalk.dim("Examples:")}
         interval?: string;
         json?: boolean;
         instance?: string;
-        parent?: number;
+        parent?: string;
       }) => {
         const json = isJsonMode(opts);
 
@@ -394,24 +394,31 @@ ${chalk.dim("Examples:")}
                   },
                 ]
               : []),
-            ...(!opts.url
-              ? [
-                  {
-                    type: "input",
-                    name: "url",
-                    message: "URL or hostname:",
-                  },
-                ]
-              : []),
           ]);
 
           const name = opts.name ?? answers.name;
           const type = opts.type ?? answers.type;
-          const url = opts.url ?? answers.url;
+          let url = opts.url;
+          if (!url && type !== "group") {
+            const urlAnswer = await prompt([
+              {
+                type: "input",
+                name: "url",
+                message: "URL or hostname:",
+              },
+            ]);
+            url = urlAnswer.url;
+          }
           const interval = parseInt(opts.interval ?? "60", 10);
 
           const { client } = await resolveClient(opts);
-          const result = await client.addMonitor({ name, type, url, interval, parent: opts.parent });
+          const result = await client.addMonitor({ 
+            name, 
+            type, 
+            url, 
+            interval, 
+            parent: opts.parent ? parseInt(opts.parent, 10) : undefined 
+          });
           client.disconnect();
 
           if (json) {
@@ -462,7 +469,7 @@ ${chalk.dim("Full pipeline (deploy → monitor → heartbeat):")}
       notificationId: number[];
       json?: boolean;
       instance?: string;
-      parent?: number;
+      parent?: string;
     }) => {
       const json = isJsonMode(opts);
       const interval = parseInt(opts.interval ?? "60", 10);
@@ -481,7 +488,7 @@ ${chalk.dim("Full pipeline (deploy → monitor → heartbeat):")}
           type: opts.type,
           url: opts.url,
           interval,
-          parent: opts.parent,  
+          parent: opts.parent ? parseInt(opts.parent, 10) : undefined,
         });
         const monitorId = result.id;
         // pushToken is returned directly from addMonitor for push monitors
