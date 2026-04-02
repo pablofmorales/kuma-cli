@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import chalk from "chalk";
+import * as fs from "fs";
 import { NotificationPayload } from "../client.js";
 import { resolveClient } from "../instance-manager.js";
 import { createTable, isJsonMode, jsonOut, success, error } from "../utils/output.js";
@@ -33,7 +34,7 @@ function resolveSecret(value: string | undefined): string | undefined {
   if (value === "-") {
     try {
       const buf = Buffer.alloc(4096);
-      const n = require("fs").readSync(0, buf, 0, buf.length, null);
+      const n = fs.readSync(0, buf, 0, buf.length, null);
       return buf.toString("utf8", 0, n).trim();
     } catch {
       return undefined;

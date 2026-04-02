@@ -1,4 +1,7 @@
 import { Command } from "commander";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { monitorsCommand } from "./commands/monitors.js";
@@ -7,6 +10,7 @@ import { statusPagesCommand } from "./commands/status-pages.js";
 import { upgradeCommand } from "./commands/upgrade.js";
 import { notificationsCommand } from "./commands/notifications.js";
 import { configCommand } from "./commands/config.js";
+import { dashboardCommand } from "./commands/dashboard.js";
 import { instancesCommand } from "./commands/instances.js";
 import { useCommand } from "./commands/use.js";
 import { clusterCommand } from "./commands/cluster.js";
@@ -14,12 +18,15 @@ import { getConfig, getConfigPath, getAllInstances, getAllClusters, getActiveCon
 import chalk from "chalk";
 import { isJsonMode, jsonOut } from "./utils/output.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
+
 const program = new Command();
 
 program
   .name("kuma")
   .description("Manage Uptime Kuma monitors, heartbeats, and status pages from your terminal.")
-  .version("0.1.0")
+  .version(pkg.version || "1.6.0")
   .addHelpText(
     "beforeAll",
     `
@@ -149,6 +156,7 @@ statusPagesCommand(program);
 upgradeCommand(program);
 notificationsCommand(program);
 configCommand(program);
+dashboardCommand(program);
 instancesCommand(program);
 useCommand(program);
 clusterCommand(program);
