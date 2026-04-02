@@ -50,9 +50,43 @@ describe("config migration", () => {
 });
 
 describe("config path", () => {
-  it("returns ~/.config/kuma-cli as config directory", () => {
-    const dir = getConfigDir();
-    expect(dir).toBe(path.join(os.homedir(), ".config", "kuma-cli"));
+  it("respects XDG_CONFIG_HOME on non-Windows platforms", () => {
+    if (process.platform === "win32") return;
+
+    const originalXdg = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = "/tmp/custom-config";
+    try {
+      const dir = getConfigDir();
+      expect(dir).toBe(path.join("/tmp/custom-config", "kuma-cli"));
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalXdg;
+    }
+  });
+
+  it("returns default path if XDG_CONFIG_HOME is not set", () => {
+    if (process.platform === "win32") return;
+
+    const originalXdg = process.env.XDG_CONFIG_HOME;
+    delete process.env.XDG_CONFIG_HOME;
+    try {
+      const dir = getConfigDir();
+      expect(dir).toBe(path.join(os.homedir(), ".config", "kuma-cli"));
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalXdg;
+    }
+  });
+
+  it("uses APPDATA on Windows", () => {
+    if (process.platform !== "win32") return;
+
+    const originalAppdata = process.env.APPDATA;
+    process.env.APPDATA = "C:\\Users\\Test\\AppData\\Roaming";
+    try {
+      const dir = getConfigDir();
+      expect(dir).toBe(path.join("C:\\Users\\Test\\AppData\\Roaming", "kuma-cli"));
+    } finally {
+      process.env.APPDATA = originalAppdata;
+    }
   });
 });
 
