@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 
 // src/index.ts
 import { Command } from "commander";
@@ -1911,9 +1905,11 @@ ${chalk6.dim("Examples:")}
 // src/commands/upgrade.ts
 import { execSync } from "child_process";
 import { readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { join as join2, dirname as dirname2 } from "path";
+import { fileURLToPath } from "url";
 import chalk7 from "chalk";
 function readCurrentVersion() {
+  const __dirname = dirname2(fileURLToPath(import.meta.url));
   try {
     const pkgPath = join2(__dirname, "..", "package.json");
     const raw = readFileSync2(pkgPath, "utf8");
@@ -1985,6 +1981,13 @@ ${chalk7.dim("Examples:")}
       process.exit(2);
     }
     const latest = release.tag_name.replace(/^v/, "");
+    if (!/^\d+\.\d+\.\d+$/.test(latest)) {
+      const msg = `Security alert: Invalid version tag received from GitHub ("${latest}"). Upgrade aborted.`;
+      if (json) jsonError(msg, 3);
+      console.error(chalk7.red(`
+\u274C ${msg}`));
+      process.exit(3);
+    }
     if (!json) console.log(chalk7.green("done"));
     if (compareSemver(current, latest) >= 0) {
       if (json) {
@@ -2038,6 +2041,7 @@ ${chalk7.bold(`Upgrading kuma-cli`)} ${chalk7.dim(`v${current}`)} \u2192 ${chalk
 
 // src/commands/notifications.ts
 import chalk8 from "chalk";
+import * as fs2 from "fs";
 function resolveSecret(value) {
   if (value === void 0) return void 0;
   if (value.startsWith("$")) {
@@ -2051,7 +2055,7 @@ function resolveSecret(value) {
   if (value === "-") {
     try {
       const buf = Buffer.alloc(4096);
-      const n = __require("fs").readSync(0, buf, 0, buf.length, null);
+      const n = fs2.readSync(0, buf, 0, buf.length, null);
       return buf.toString("utf8", 0, n).trim();
     } catch {
       return void 0;
