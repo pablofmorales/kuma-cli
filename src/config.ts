@@ -1,4 +1,6 @@
-import Conf from "conf";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 // --- Interfaces ---
 
@@ -23,11 +25,85 @@ export interface KumaConfigSchema {
   active: ActiveContext | null;
 }
 
-// --- Conf store (schemaless to support migration) ---
+// --- Config path ---
 
-const conf = new Conf<Record<string, unknown>>({
-  projectName: "kuma-cli",
-});
+export function getConfigDir(): string {
+  const platform = process.platform;
+  if (platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "kuma-cli");
+  }
+  const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(configHome, "kuma-cli");
+}
+
+function getConfigFilePath(): string {
+  return path.join(getConfigDir(), "config.json");
+}
+
+/**
+ * Returns the old platform-specific config path used by the `conf` library.
+ * macOS: ~/Library/Preferences/kuma-cli-nodejs/config.json
+ * Linux: ~/.config/kuma-cli-nodejs/config.json
+ * Windows: %APPDATA%/kuma-cli-nodejs/config.json
+ */
+function getOldConfigFilePath(): string {
+  const platform = process.platform;
+  if (platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Preferences", "kuma-cli-nodejs", "config.json");
+  }
+  if (platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "kuma-cli-nodejs", "config.json");
+  }
+  // Linux and others: XDG
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "kuma-cli-nodejs", "config.json");
+}
+
+/**
+ * Pure function to decide which config source to use.
+ * Inputs are file contents as strings (null if file doesn't exist).
+ */
+export function migrateConfigPath(
+  oldContent: string | null,
+  newContent: string | null
+): { source: "old" | "new" | "none"; data: Record<string, unknown> | null } {
+  if (newContent !== null) {
+    try {
+      return { source: "new", data: JSON.parse(newContent) };
+    } catch {
+      // Corrupted new config — fall through
+    }
+  }
+  if (oldContent !== null) {
+    try {
+      return { source: "old", data: JSON.parse(oldContent) };
+    } catch {
+      // Corrupted old config — fall through
+    }
+  }
+  return { source: "none", data: null };
+}
+
+function readFileOrNull(filePath: string): string | null {
+  try {
+    return fs.readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+function writeConfigFile(data: Record<string, unknown>): void {
+  const filePath = getConfigFilePath();
+  const dirPath = path.dirname(filePath);
+
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 });
+  }
+
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+}
 
 // --- Hostname derivation ---
 
@@ -83,16 +159,26 @@ export function migrateConfig(raw: Record<string, unknown>): KumaConfigSchema {
 // --- Internal: load and save full config ---
 
 function loadConfig(): KumaConfigSchema {
-  const raw = conf.store;
-  const migrated = migrateConfig(raw as Record<string, unknown>);
-  if (!raw.instances) {
-    conf.store = migrated as unknown as Record<string, unknown>;
+  const newPath = getConfigFilePath();
+  const oldPath = getOldConfigFilePath();
+  const { source, data } = migrateConfigPath(readFileOrNull(oldPath), readFileOrNull(newPath));
+
+  if (source === "none" || data === null) {
+    return { instances: {}, clusters: {}, active: null };
   }
+
+  const migrated = migrateConfig(data);
+
+  // Persist to new location if read from old path or if schema migration happened
+  if (source === "old" || !data.instances) {
+    writeConfigFile(migrated as unknown as Record<string, unknown>);
+  }
+
   return migrated;
 }
 
 function saveFullConfig(config: KumaConfigSchema): void {
-  conf.store = config as unknown as Record<string, unknown>;
+  writeConfigFile(config as unknown as Record<string, unknown>);
 }
 
 // --- Public API: Instances ---
@@ -225,9 +311,14 @@ export function saveConfig(instanceConfig: { url: string; token: string }, alias
 }
 
 export function clearConfig(): void {
-  conf.clear();
+  const filePath = getConfigFilePath();
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // File doesn't exist — nothing to clear
+  }
 }
 
 export function getConfigPath(): string {
-  return conf.path;
+  return getConfigFilePath();
 }

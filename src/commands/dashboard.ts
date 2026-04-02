@@ -1,6 +1,6 @@
-import path from "path";
 import { resolveClient } from "../instance-manager.js";
 import { handleError } from "../utils/errors.js";
+import { renderDashboard } from "../tui/render.js";
 
 export async function launchDashboard(opts: {
   instance?: string;
@@ -9,10 +9,6 @@ export async function launchDashboard(opts: {
 }): Promise<void> {
   try {
     const refreshInterval = Math.max(5, parseInt(opts.refresh, 10) || 30);
-
-    // TUI bundle is ESM (ink/react are ESM-only), loaded dynamically from CJS.
-    const tuiPath = path.join(__dirname, "tui-app.mjs");
-    const { renderDashboard } = await import(/* webpackIgnore: true */ tuiPath);
 
     // Try to resolve an existing instance, but launch TUI either way
     let client = null;

@@ -1,16 +1,17 @@
 import { Command } from "commander";
 import { execSync } from "child_process";
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { isJsonMode, jsonOut, jsonError } from "../utils/output.js";
 import chalk from "chalk";
 
 /**
  * Read the version from package.json at build time.
  * Works in both ESM (via import) and CJS bundles (via fs.readFileSync).
- * We walk up from __dirname until we find a package.json with a "version".
  */
 function readCurrentVersion(): string {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
   // tsup bundles to dist/index.js; package.json is one level up
   try {
     const pkgPath = join(__dirname, "..", "package.json");
@@ -115,6 +116,15 @@ ${chalk.dim("Examples:")}
       }
 
       const latest = release.tag_name.replace(/^v/, "");
+
+      // Security: Strict validation of the version tag to prevent command injection.
+      // We only allow standard x.y.z semver strings.
+      if (!/^\d+\.\d+\.\d+$/.test(latest)) {
+        const msg = `Security alert: Invalid version tag received from GitHub ("${latest}"). Upgrade aborted.`;
+        if (json) jsonError(msg, 3);
+        console.error(chalk.red(`\n❌ ${msg}`));
+        process.exit(3);
+      }
 
       if (!json) console.log(chalk.green("done"));
 

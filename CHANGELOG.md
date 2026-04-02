@@ -1,3 +1,13 @@
+## [1.6.0](https://github.com/pablofmorales/kuma-cli/compare/v1.5.2...v1.6.0) (2026-04-02)
+
+### 🚀 Features
+
+* add parent option to monitors and group monitor type ([ade1f14](https://github.com/pablofmorales/kuma-cli/commit/ade1f14516e4ce3dbed724ad0f03c64b4a9d99e3))
+
+### 🐛 Bug Fixes
+
+* improve add/create input handling for parent and group monitors ([b5efe9a](https://github.com/pablofmorales/kuma-cli/commit/b5efe9a948b71027138ce79045442640de4e780f))
+
 ## [1.5.2](https://github.com/pablofmorales/kuma-cli/compare/v1.5.1...v1.5.2) (2026-03-31)
 
 ### 🐛 Bug Fixes

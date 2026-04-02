@@ -1,4 +1,7 @@
 import { Command } from "commander";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { monitorsCommand } from "./commands/monitors.js";
@@ -15,12 +18,15 @@ import { getConfig, getConfigPath, getAllInstances, getAllClusters, getActiveCon
 import chalk from "chalk";
 import { isJsonMode, jsonOut } from "./utils/output.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
+
 const program = new Command();
 
 program
   .name("kuma")
   .description("Manage Uptime Kuma monitors, heartbeats, and status pages from your terminal.")
-  .version("0.1.0")
+  .version(pkg.version || "1.6.0")
   .addHelpText(
     "beforeAll",
     `

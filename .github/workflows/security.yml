@@ -1,0 +1,11 @@
+name: Security
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  security:
+    uses: pablofmorales/security-workflows/.github/workflows/security.yml@main
+    secrets: inherit

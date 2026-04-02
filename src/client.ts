@@ -245,7 +245,7 @@ export class KumaClient {
         : undefined;
 
     const payload = {
-      accepted_statuscodes: ["200-299"],
+      accepted_statuscodes_json: JSON.stringify(["200-299"]),
       maxretries: 1,
       retryInterval: 60,
       conditions: [],
