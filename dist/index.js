@@ -850,17 +850,22 @@ function isJsonMode(opts) {
   return env === "1" || env === "true" || env === "yes";
 }
 async function getJsonInput(inputJson) {
-  if (inputJson) {
+  if (inputJson && inputJson !== "-") {
     try {
       return JSON.parse(inputJson);
     } catch (e) {
       throw new Error("Invalid JSON provided to --input-json");
     }
   }
-  if (!process.stdin.isTTY) {
+  const shouldReadFromStdin = inputJson === "-" || !inputJson && !process.stdin.isTTY;
+  if (shouldReadFromStdin) {
     const buffers = [];
-    for await (const chunk of process.stdin) {
-      buffers.push(chunk);
+    try {
+      for await (const chunk of process.stdin) {
+        buffers.push(chunk);
+      }
+    } catch (e) {
+      throw new Error(`Failed to read from stdin: ${e instanceof Error ? e.message : String(e)}`);
     }
     const content = Buffer.concat(buffers).toString("utf8").trim();
     if (content) {
