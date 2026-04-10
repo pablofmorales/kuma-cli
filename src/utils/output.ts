@@ -92,7 +92,9 @@ export function isJsonMode(opts?: { json?: boolean }): boolean {
  * or from stdin if it's piped.
  */
 export async function getJsonInput(inputJson?: string): Promise<any> {
-  if (inputJson) {
+  // If inputJson is "-", we treat it as a request to read from stdin.
+  // Otherwise, if it's a non-empty string, we try to parse it as JSON.
+  if (inputJson && inputJson !== "-") {
     try {
       return JSON.parse(inputJson);
     } catch (e) {
@@ -100,16 +102,27 @@ export async function getJsonInput(inputJson?: string): Promise<any> {
     }
   }
 
-  // Only read from stdin if it's not a TTY (i.e. piped)
-  if (!process.stdin.isTTY) {
+  // Read from stdin if:
+  // 1. inputJson was explicitly set to "-"
+  // 2. OR no inputJson was provided but stdin is piped (not a TTY)
+  const shouldReadFromStdin = inputJson === "-" || (!inputJson && !process.stdin.isTTY);
+
+  if (shouldReadFromStdin) {
     const buffers = [];
-    for await (const chunk of process.stdin) {
-      buffers.push(chunk);
+    try {
+      for await (const chunk of process.stdin) {
+        buffers.push(chunk);
+      }
+    } catch (e) {
+      throw new Error(`Failed to read from stdin: ${e instanceof Error ? e.message : String(e)}`);
     }
+
     const content = Buffer.concat(buffers).toString("utf8").trim();
     if (content) {
       try {
-        return JSON.parse(content);
+        const parsed = JSON.parse(content);
+        // console.error("DEBUG: Parsed JSON:", parsed);
+        return parsed;
       } catch (e) {
         throw new Error("Invalid JSON provided via stdin");
       }
