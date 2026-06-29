@@ -133,7 +133,7 @@ var KumaClient = class {
   async addMonitor(monitor) {
     const autoToken = monitor.type === "push" && !monitor.pushToken ? Array.from(crypto.getRandomValues(new Uint8Array(24))).map((b) => b.toString(16).padStart(2, "0")).join("") : void 0;
     const payload = {
-      accepted_statuscodes_json: JSON.stringify(["200-299"]),
+      accepted_statuscodes: ["200-299"],
       maxretries: 1,
       retryInterval: 60,
       conditions: [],
