@@ -43,7 +43,8 @@ const MONITOR_TYPES = [
   "mongodb",
   "radius",
   "redis",
-  "group"
+  "group",
+  "keyword",
 ];
 
 export function monitorsCommand(program: Command): void {
@@ -357,6 +358,7 @@ ${chalk.dim("Examples:")}
     .option("--json", "Output as JSON ({ ok, data })")
     .option("--instance <name>", "Target a specific instance")
     .option("--parent <id>", "Add as a child monitor under an existing group monitor (ID)")
+    .option("--keyword <keyword>", "Keyword to search for in response body (for type: keyword)")
     .addHelpText(
       "after",
       `
@@ -372,6 +374,7 @@ ${chalk.dim("Examples:")}
         name?: string;
         type?: string;
         url?: string;
+        keyword?: string;
         interval?: string;
         json?: boolean;
         instance?: string;
@@ -417,13 +420,14 @@ ${chalk.dim("Examples:")}
             type, 
             url, 
             interval, 
+            keyword: opts.keyword,
             parent: opts.parent ? parseInt(opts.parent, 10) : undefined 
           });
-          client.disconnect();
 
           if (json) {
-            jsonOut({ id: result.id, name, type, url, interval });
+            jsonOut({ id: result.id, name, type, url, keyword: opts.keyword, interval });
           }
+          client.disconnect();
 
           success(`Monitor "${name}" created (ID: ${result.id})`);
         } catch (err) {
@@ -431,7 +435,6 @@ ${chalk.dim("Examples:")}
         }
       }
     );
-
   // CREATE (non-interactive, with tag support — for CI/CD pipelines)
   monitors
     .command("create")
@@ -445,6 +448,7 @@ ${chalk.dim("Examples:")}
     .option("--json", "Output as JSON ({ ok, data }) — prints monitor ID and pushToken to stdout")
     .option("--instance <name>", "Target a specific instance")
     .option("--parent <id>", "Create as a child monitor under an existing group monitor (ID)")
+    .option("--keyword <keyword>", "Keyword to search for in response body (for type: keyword)")
     .addHelpText(
       "after",
       `
@@ -464,6 +468,7 @@ ${chalk.dim("Full pipeline (deploy → monitor → heartbeat):")}
       name: string;
       type: string;
       url?: string;
+      keyword?: string;
       interval?: string;
       tag: string[];
       notificationId: number[];
@@ -488,6 +493,7 @@ ${chalk.dim("Full pipeline (deploy → monitor → heartbeat):")}
           type: opts.type,
           url: opts.url,
           interval,
+          keyword: opts.keyword,
           parent: opts.parent ? parseInt(opts.parent, 10) : undefined,
         });
         const monitorId = result.id;
@@ -533,6 +539,7 @@ ${chalk.dim("Full pipeline (deploy → monitor → heartbeat):")}
             name: opts.name,
             type: opts.type,
             url: opts.url ?? null,
+            keyword: opts.keyword,
             interval,
           };
           if (pushToken) data.pushToken = pushToken;

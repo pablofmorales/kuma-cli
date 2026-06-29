@@ -1070,7 +1070,8 @@ var MONITOR_TYPES = [
   "mongodb",
   "radius",
   "redis",
-  "group"
+  "group",
+  "keyword"
 ];
 function monitorsCommand(program2) {
   const monitors = program2.command("monitors").description("Create, view, update, pause, resume, and delete monitors").addHelpText(
@@ -1288,7 +1289,7 @@ ${list.length} monitor(s) total`);
       }
     }
   );
-  monitors.command("add").description("Add a new monitor \u2014 runs interactively if flags are omitted").option("--name <name>", "Display name for the monitor").option("--type <type>", "Monitor type: http, tcp, ping, dns, push, steam, ...").option("--url <url>", "URL (http), hostname:port (tcp), or hostname (ping/dns)").option("--interval <seconds>", "How often to check, in seconds (default: 60)", "60").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").option("--parent <id>", "Add as a child monitor under an existing group monitor (ID)").addHelpText(
+  monitors.command("add").description("Add a new monitor \u2014 runs interactively if flags are omitted").option("--name <name>", "Display name for the monitor").option("--type <type>", "Monitor type: http, tcp, ping, dns, push, steam, ...").option("--url <url>", "URL (http), hostname:port (tcp), or hostname (ping/dns)").option("--interval <seconds>", "How often to check, in seconds (default: 60)", "60").option("--json", "Output as JSON ({ ok, data })").option("--instance <name>", "Target a specific instance").option("--parent <id>", "Add as a child monitor under an existing group monitor (ID)").option("--keyword <keyword>", "Keyword to search for in response body (for type: keyword)").addHelpText(
     "after",
     `
 ${chalk4.dim("Examples:")}
@@ -1332,19 +1333,20 @@ ${chalk4.dim("Examples:")}
           type,
           url,
           interval,
+          keyword: opts.keyword,
           parent: opts.parent ? parseInt(opts.parent, 10) : void 0
         });
-        client.disconnect();
         if (json) {
-          jsonOut({ id: result.id, name, type, url, interval });
+          jsonOut({ id: result.id, name, type, url, keyword: opts.keyword, interval });
         }
+        client.disconnect();
         success(`Monitor "${name}" created (ID: ${result.id})`);
       } catch (err) {
         handleError(err, opts);
       }
     }
   );
-  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable \u2014 must already exist in Kuma)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID and pushToken to stdout").option("--instance <name>", "Target a specific instance").option("--parent <id>", "Create as a child monitor under an existing group monitor (ID)").addHelpText(
+  monitors.command("create").description("Create a monitor non-interactively \u2014 designed for CI/CD pipelines").requiredOption("--name <name>", "Monitor display name").requiredOption("--type <type>", "Monitor type: http, tcp, ping, dns, push, ...").option("--url <url>", "URL or hostname to monitor").option("--interval <seconds>", "Check interval in seconds (default: 60)", "60").option("--tag <tag>", "Assign a tag by name (repeatable \u2014 must already exist in Kuma)", collect, []).option("--notification-id <id>", "Assign a notification channel by ID (repeatable)", collectInt, []).option("--json", "Output as JSON ({ ok, data }) \u2014 prints monitor ID and pushToken to stdout").option("--instance <name>", "Target a specific instance").option("--parent <id>", "Create as a child monitor under an existing group monitor (ID)").option("--keyword <keyword>", "Keyword to search for in response body (for type: keyword)").addHelpText(
     "after",
     `
 ${chalk4.dim("Examples:")}
@@ -1371,6 +1373,7 @@ ${chalk4.dim("Full pipeline (deploy \u2192 monitor \u2192 heartbeat):")}
         type: opts.type,
         url: opts.url,
         interval,
+        keyword: opts.keyword,
         parent: opts.parent ? parseInt(opts.parent, 10) : void 0
       });
       const monitorId = result.id;
@@ -1405,6 +1408,7 @@ ${chalk4.dim("Full pipeline (deploy \u2192 monitor \u2192 heartbeat):")}
           name: opts.name,
           type: opts.type,
           url: opts.url ?? null,
+          keyword: opts.keyword,
           interval
         };
         if (pushToken) data.pushToken = pushToken;
