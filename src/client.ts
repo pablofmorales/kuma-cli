@@ -4,6 +4,8 @@ export interface LoginResult {
   ok: boolean;
   token?: string;
   msg?: string;
+  // Set by Kuma when the account has 2FA enabled and no TOTP code was sent
+  tokenRequired?: boolean;
 }
 
 export interface MonitorTag {
@@ -175,7 +177,13 @@ export class KumaClient {
   }
 
   // BUG-01 fix: use Socket.IO acknowledgement callbacks instead of waitFor()
-  async login(username: string, password: string): Promise<LoginResult> {
+  // `totpToken` is the 6-digit 2FA code; Kuma expects it as `token` in the
+  // login payload. Without it, 2FA-enabled accounts get { ok: false, tokenRequired: true }.
+  async login(
+    username: string,
+    password: string,
+    totpToken?: string
+  ): Promise<LoginResult> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("Login timeout")),
@@ -183,7 +191,7 @@ export class KumaClient {
       );
       this.socket.emit(
         "login",
-        { username, password },
+        { username, password, ...(totpToken ? { token: totpToken } : {}) },
         (result: LoginResult) => {
           clearTimeout(timer);
           resolve(result);
