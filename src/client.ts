@@ -245,7 +245,12 @@ export class KumaClient {
         : undefined;
 
     const payload = {
-      accepted_statuscodes_json: JSON.stringify(["200-299"]),
+      // Kuma's "add" handler reads accepted_statuscodes (array) and serializes it itself.
+      accepted_statuscodes: ["200-299"],
+      method: "GET",
+      maxredirects: 10,
+      // Same default as the Kuma UI (80% of interval); without it Kuma falls back to a bogus timeout.
+      timeout: ~~((monitor.interval ?? 60) * 8) / 10,
       maxretries: 1,
       retryInterval: 60,
       conditions: [],
