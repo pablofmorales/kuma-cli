@@ -133,7 +133,12 @@ var KumaClient = class {
   async addMonitor(monitor) {
     const autoToken = monitor.type === "push" && !monitor.pushToken ? Array.from(crypto.getRandomValues(new Uint8Array(24))).map((b) => b.toString(16).padStart(2, "0")).join("") : void 0;
     const payload = {
-      accepted_statuscodes_json: JSON.stringify(["200-299"]),
+      // Kuma's "add" handler reads accepted_statuscodes (array) and serializes it itself.
+      accepted_statuscodes: ["200-299"],
+      method: "GET",
+      maxredirects: 10,
+      // Same default as the Kuma UI (80% of interval); without it Kuma falls back to a bogus timeout.
+      timeout: ~~((monitor.interval ?? 60) * 8) / 10,
       maxretries: 1,
       retryInterval: 60,
       conditions: [],
