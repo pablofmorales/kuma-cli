@@ -46,6 +46,7 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 |---------|-------------|
 | `kuma login <url>` | Authenticate with Uptime Kuma and save session |
 | `kuma login <url> --as <alias>` | Save the instance under a custom alias |
+| `kuma login <url> --totp <code>` | Login with a 2FA/TOTP code (interactive login prompts automatically) |
 | `kuma logout` | Clear token for the active instance |
 | `kuma logout --all` | Clear all saved instances and config |
 | `kuma status` | Show active instance, cluster membership, and config path |

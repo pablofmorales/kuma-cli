@@ -79,7 +79,9 @@ var KumaClient = class {
     });
   }
   // BUG-01 fix: use Socket.IO acknowledgement callbacks instead of waitFor()
-  async login(username, password) {
+  // `totpToken` is the 6-digit 2FA code; Kuma expects it as `token` in the
+  // login payload. Without it, 2FA-enabled accounts get { ok: false, tokenRequired: true }.
+  async login(username, password, totpToken) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("Login timeout")),
@@ -87,7 +89,7 @@ var KumaClient = class {
       );
       this.socket.emit(
         "login",
-        { username, password },
+        { username, password, ...totpToken ? { token: totpToken } : {} },
         (result) => {
           clearTimeout(timer);
           resolve(result);
@@ -890,7 +892,7 @@ var { prompt } = enquirer;
 function loginCommand(program2) {
   program2.command("login <url>").description(
     "Authenticate with an Uptime Kuma instance and save the session token locally"
-  ).option("--json", "Output as JSON ({ ok, data })").option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)").addHelpText(
+  ).option("--json", "Output as JSON ({ ok, data })").option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)").option("--totp <code>", "2FA/TOTP code (for accounts with two-factor authentication)").addHelpText(
     "after",
     `
 ${chalk2.dim("Examples:")}
@@ -899,6 +901,9 @@ ${chalk2.dim("Examples:")}
 
   ${chalk2.cyan("kuma login https://kuma.example.com --as my-server")}
   ${chalk2.cyan("  Saves as 'my-server' (custom alias you choose)")}
+
+  ${chalk2.cyan("kuma login https://kuma.example.com --totp 123456")}
+  ${chalk2.cyan("  Login with a 2FA code (interactive login prompts for it automatically)")}
 
 ${chalk2.dim("Multi-instance workflow:")}
   ${chalk2.cyan("kuma login https://kuma1.example.com --as server1")}
@@ -942,7 +947,24 @@ ${chalk2.dim("Notes:")}
       const { username, password } = answers;
       const client = new KumaClient(normalizedUrl);
       await client.connect();
-      const result = await client.login(username, password);
+      let result = await client.login(username, password, opts.totp);
+      if (!result.ok && result.tokenRequired) {
+        if (opts.totp || json) {
+          client.disconnect();
+          const msg = opts.totp ? "Invalid 2FA token" : "This account requires a 2FA token. Pass it with --totp <code>.";
+          if (json) {
+            jsonOut({ error: msg });
+          }
+          error(msg);
+          process.exit(1);
+        }
+        const totpAnswer = await prompt({
+          type: "input",
+          name: "totp",
+          message: "2FA token:"
+        });
+        result = await client.login(username, password, totpAnswer.totp.trim());
+      }
       client.disconnect();
       if (!result.ok || !result.token) {
         const msg = result.msg ?? "Login failed";

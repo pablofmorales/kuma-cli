@@ -16,6 +16,7 @@ export function loginCommand(program: Command): void {
     )
     .option("--json", "Output as JSON ({ ok, data })")
     .option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)")
+    .option("--totp <code>", "2FA/TOTP code (for accounts with two-factor authentication)")
     .addHelpText(
       "after",
       `
@@ -25,6 +26,9 @@ ${chalk.dim("Examples:")}
 
   ${chalk.cyan("kuma login https://kuma.example.com --as my-server")}
   ${chalk.cyan("  Saves as 'my-server' (custom alias you choose)")}
+
+  ${chalk.cyan("kuma login https://kuma.example.com --totp 123456")}
+  ${chalk.cyan("  Login with a 2FA code (interactive login prompts for it automatically)")}
 
 ${chalk.dim("Multi-instance workflow:")}
   ${chalk.cyan("kuma login https://kuma1.example.com --as server1")}
@@ -39,7 +43,7 @@ ${chalk.dim("Notes:")}
   Token location: run ${chalk.cyan("kuma status")} to see the config path.
 `
     )
-    .action(async (url: string, opts: { json?: boolean; as?: string }) => {
+    .action(async (url: string, opts: { json?: boolean; as?: string; totp?: string }) => {
       const json = isJsonMode(opts);
 
       try {
@@ -82,7 +86,34 @@ ${chalk.dim("Notes:")}
         const client = new KumaClient(normalizedUrl);
         await client.connect();
 
-        const result = await client.login(username, password);
+        let result = await client.login(username, password, opts.totp);
+
+        // Account has 2FA enabled and no (or no valid) TOTP code was provided:
+        // Kuma answers { ok: false, tokenRequired: true } instead of a msg.
+        if (!result.ok && result.tokenRequired) {
+          if (opts.totp || json) {
+            // Non-interactive: a code was already given (and rejected) or we
+            // can't prompt in JSON mode — fail with a clear message.
+            client.disconnect();
+            const msg = opts.totp
+              ? "Invalid 2FA token"
+              : "This account requires a 2FA token. Pass it with --totp <code>.";
+            if (json) {
+              jsonOut({ error: msg });
+            }
+            error(msg);
+            process.exit(1);
+          }
+
+          const totpAnswer = (await prompt({
+            type: "input",
+            name: "totp",
+            message: "2FA token:",
+          })) as { totp: string };
+
+          result = await client.login(username, password, totpAnswer.totp.trim());
+        }
+
         client.disconnect();
 
         if (!result.ok || !result.token) {
