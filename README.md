@@ -46,6 +46,7 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 |---------|-------------|
 | `kuma login <url>` | Authenticate with Uptime Kuma and save session |
 | `kuma login <url> --as <alias>` | Save the instance under a custom alias |
+| `kuma login <url> --basic-auth-user <u> --basic-auth-pass <p>` | Login through a reverse proxy that requires HTTP Basic Auth |
 | `kuma logout` | Clear token for the active instance |
 | `kuma logout --all` | Clear all saved instances and config |
 | `kuma status` | Show active instance, cluster membership, and config path |
@@ -53,6 +54,8 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 | `kuma instances remove <name>` | Remove a saved instance by its alias |
 | `kuma use <name>` | Switch the active instance |
 | `kuma use --cluster <name>` | Switch the active cluster |
+
+If your instance sits behind a reverse proxy that requires HTTP Basic Auth (e.g. nginx `auth_basic`), pass `--basic-auth-user`/`--basic-auth-pass` at login. They are stored with the instance and sent on every connection — Socket.IO handshake and `heartbeat send` included.
 
 ### Monitors
 
@@ -85,6 +88,7 @@ kuma monitors create --name "My API" --type http --url https://api.example.com
 | `kuma heartbeat view <monitor-id> --json` | Output raw JSON |
 | `kuma heartbeat send <push-token>` | Send push heartbeat (no auth needed) |
 | `kuma heartbeat send <push-token> --status down --msg "text"` | Send with status/message |
+| `kuma heartbeat send <push-token> --basic-auth-user <u> --basic-auth-pass <p>` | Send through a proxy that requires Basic Auth (overrides saved credentials) |
 
 ### Notifications
 

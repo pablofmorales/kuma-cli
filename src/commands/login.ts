@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import enquirer from "enquirer";
-import { KumaClient } from "../client.js";
+import { KumaClient, buildBasicAuthHeaders } from "../client.js";
 import { saveConfig } from "../config.js";
 import { success, error, isJsonMode, jsonOut } from "../utils/output.js";
 import { handleError } from "../utils/errors.js";
@@ -16,6 +16,8 @@ export function loginCommand(program: Command): void {
     )
     .option("--json", "Output as JSON ({ ok, data })")
     .option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)")
+    .option("--basic-auth-user <user>", "HTTP Basic Auth username (for instances behind an auth-gated reverse proxy)")
+    .option("--basic-auth-pass <pass>", "HTTP Basic Auth password (for instances behind an auth-gated reverse proxy)")
     .addHelpText(
       "after",
       `
@@ -35,14 +37,20 @@ ${chalk.dim("Multi-instance workflow:")}
 ${chalk.dim("Notes:")}
   The --as alias is how you reference this instance in other commands
   (e.g. --instance server1, or when creating clusters).
-  Credentials are never stored — only the session token is saved.
+  Your Kuma credentials are never stored — only the session token is saved.
+  (--basic-auth-user/--basic-auth-pass, if provided, are stored with the instance.)
   Token location: run ${chalk.cyan("kuma status")} to see the config path.
 `
     )
-    .action(async (url: string, opts: { json?: boolean; as?: string }) => {
+    .action(async (url: string, opts: { json?: boolean; as?: string; basicAuthUser?: string; basicAuthPass?: string }) => {
       const json = isJsonMode(opts);
 
       try {
+        // A proxy password without a user can't build a header — reject early
+        if (opts.basicAuthPass && !opts.basicAuthUser) {
+          handleError(new Error("--basic-auth-pass requires --basic-auth-user"), opts);
+        }
+
         // Normalize URL
         const normalizedUrl = url.replace(/\/$/, "");
 
@@ -61,7 +69,7 @@ ${chalk.dim("Notes:")}
           }
         }
 
-        const answers = await prompt([
+        const questions: Record<string, string>[] = [
           {
             type: "input",
             name: "username",
@@ -72,14 +80,29 @@ ${chalk.dim("Notes:")}
             name: "password",
             message: "Password:",
           },
-        ]);
+        ];
 
-        const { username, password } = answers as {
+        // Proxy user given without a password → ask for it interactively so
+        // it never ends up in shell history (login is interactive anyway)
+        if (opts.basicAuthUser && !opts.basicAuthPass) {
+          questions.push({
+            type: "password",
+            name: "proxyPassword",
+            message: "Proxy password (Basic Auth):",
+          });
+        }
+
+        const answers = await prompt(questions);
+
+        const { username, password, proxyPassword } = answers as {
           username: string;
           password: string;
+          proxyPassword?: string;
         };
 
-        const client = new KumaClient(normalizedUrl);
+        const basicAuthPass = opts.basicAuthPass ?? proxyPassword;
+        const extraHeaders = buildBasicAuthHeaders(opts.basicAuthUser, basicAuthPass);
+        const client = new KumaClient(normalizedUrl, extraHeaders);
         await client.connect();
 
         const result = await client.login(username, password);
@@ -94,7 +117,15 @@ ${chalk.dim("Notes:")}
           process.exit(1);
         }
 
-        const instanceName = saveConfig({ url: normalizedUrl, token: result.token }, opts.as);
+        const instanceName = saveConfig(
+          {
+            url: normalizedUrl,
+            token: result.token,
+            basicAuthUser: opts.basicAuthUser,
+            basicAuthPass,
+          },
+          opts.as
+        );
 
         if (json) {
           jsonOut({ url: normalizedUrl, username, instanceName });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { migrateConfig, deriveInstanceName, getConfigDir, migrateConfigPath } from "../config.js";
+import { migrateConfig, deriveInstanceName, getConfigDir, migrateConfigPath, saveConfig, getInstanceConfig, getConfigPath } from "../config.js";
+import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
@@ -86,6 +87,41 @@ describe("config path", () => {
       expect(dir).toBe(path.join("C:\\Users\\Test\\AppData\\Roaming", "kuma-cli"));
     } finally {
       process.env.APPDATA = originalAppdata;
+    }
+  });
+});
+
+describe("saveConfig", () => {
+  it("persists basicAuth fields and omits them when not provided", () => {
+    // Redirect the config dir to a temp location (APPDATA on Windows, XDG elsewhere)
+    const envKey = process.platform === "win32" ? "APPDATA" : "XDG_CONFIG_HOME";
+    const original = process.env[envKey];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kuma-cli-test-"));
+    process.env[envKey] = tmpDir;
+    try {
+      saveConfig(
+        { url: "https://kuma.example.com", token: "abc", basicAuthUser: "proxy-user", basicAuthPass: "proxy-pass" },
+        "withauth"
+      );
+      saveConfig({ url: "https://plain.example.com", token: "def" }, "noauth");
+
+      const withAuth = getInstanceConfig("withauth");
+      expect(withAuth?.basicAuthUser).toBe("proxy-user");
+      expect(withAuth?.basicAuthPass).toBe("proxy-pass");
+
+      // Undefined fields must not be written to config.json
+      const raw = JSON.parse(fs.readFileSync(getConfigPath(), "utf-8"));
+      expect(raw.instances.noauth).toEqual({ url: "https://plain.example.com", token: "def" });
+      expect(raw.instances.withauth).toEqual({
+        url: "https://kuma.example.com",
+        token: "abc",
+        basicAuthUser: "proxy-user",
+        basicAuthPass: "proxy-pass",
+      });
+    } finally {
+      if (original === undefined) delete process.env[envKey];
+      else process.env[envKey] = original;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

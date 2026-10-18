@@ -7,6 +7,8 @@ import * as os from "os";
 export interface InstanceConfig {
   url: string;
   token: string;
+  basicAuthUser?: string;
+  basicAuthPass?: string;
 }
 
 export interface ClusterConfig {
@@ -273,7 +275,7 @@ export function clearActiveContext(): void {
 
 // --- Public API: Backward-compatible helpers ---
 
-export function getConfig(): { url: string; token: string } | null {
+export function getConfig(): InstanceConfig | null {
   const config = loadConfig();
   const active = config.active;
 
@@ -303,7 +305,7 @@ export function getConfig(): { url: string; token: string } | null {
   return null;
 }
 
-export function saveConfig(instanceConfig: { url: string; token: string }, alias?: string): string {
+export function saveConfig(instanceConfig: InstanceConfig, alias?: string): string {
   const name = alias ?? deriveInstanceName(instanceConfig.url);
   saveInstanceConfig(name, instanceConfig);
   setActiveContext({ type: "instance", name });

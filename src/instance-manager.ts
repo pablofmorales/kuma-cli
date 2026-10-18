@@ -6,7 +6,7 @@ import {
   type InstanceConfig,
   type ClusterConfig,
 } from "./config.js";
-import { createAuthenticatedClient, type KumaClient } from "./client.js";
+import { createAuthenticatedClient, buildBasicAuthHeaders, type KumaClient } from "./client.js";
 
 export interface CommandFlags {
   instance?: string;
@@ -54,7 +54,7 @@ export async function resolveClient(flags: CommandFlags): Promise<{ client: Kuma
   const name = resolveInstanceName(flags);
   const config = getInstanceConfig(name);
   if (!config) throw new Error(`Instance '${name}' not found.`);
-  const client = await createAuthenticatedClient(config.url, config.token);
+  const client = await createAuthenticatedClient(config.url, config.token, buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass));
   return { client, instanceName: name };
 }
 
@@ -87,7 +87,7 @@ export async function resolveClusterClients(
     cluster.instances.map(async (instanceName) => {
       const config = getInstanceConfig(instanceName);
       if (!config) throw new Error(`Instance '${instanceName}' not configured`);
-      const client = await createAuthenticatedClient(config.url, config.token);
+      const client = await createAuthenticatedClient(config.url, config.token, buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass));
       return { name: instanceName, client };
     })
   );

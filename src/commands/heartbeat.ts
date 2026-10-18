@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { buildBasicAuthHeaders } from "../client.js";
 import { getConfig, getInstanceConfig } from "../config.js";
 import { resolveClient } from "../instance-manager.js";
 import {
@@ -97,6 +98,8 @@ ${chalk.dim("Examples:")}
     .option("--ping <ms>", "Optional response time in milliseconds")
     .option("--url <url>", "Kuma base URL (defaults to saved login URL)")
     .option("--instance <name>", "Target a specific instance")
+    .option("--basic-auth-user <user>", "HTTP Basic Auth username (overrides saved instance credentials)")
+    .option("--basic-auth-pass <pass>", "HTTP Basic Auth password (overrides saved instance credentials)")
     .option("--json", "Output as JSON ({ ok, data })")
     .addHelpText(
       "after",
@@ -105,6 +108,7 @@ ${chalk.dim("Examples:")}
   ${chalk.cyan("kuma heartbeat send abc123")}
   ${chalk.cyan("kuma heartbeat send abc123 --status down --msg \"Job failed\"")}
   ${chalk.cyan("kuma heartbeat send abc123 --msg \"Deploy complete\" --ping 42")}
+  ${chalk.cyan("kuma heartbeat send abc123 --basic-auth-user admin --basic-auth-pass s3cret")}
   ${chalk.cyan("kuma heartbeat send abc123 --json")}
 
 ${chalk.dim("GitHub Actions usage:")}
@@ -126,6 +130,8 @@ ${chalk.dim("Finding your push token:")}
       ping?: string;
       url?: string;
       instance?: string;
+      basicAuthUser?: string;
+      basicAuthPass?: string;
       json?: boolean;
     }) => {
       const json = isJsonMode(opts);
@@ -149,8 +155,19 @@ ${chalk.dim("Finding your push token:")}
         process.exit(EXIT_CODES.GENERAL);
       }
 
-      // Determine base URL
+      if (opts.basicAuthPass && !opts.basicAuthUser) {
+        const msg = "--basic-auth-pass requires --basic-auth-user";
+        if (json) jsonError(msg, EXIT_CODES.GENERAL);
+        console.error(chalk.red(`❌ ${msg}`));
+        process.exit(EXIT_CODES.GENERAL);
+      }
+
+      // Determine base URL.
+      // Explicit --basic-auth-* flags always win over stored instance credentials.
+      // An arbitrary --url never gets stored credentials attached (credential-leak risk).
+      const flagHeaders = buildBasicAuthHeaders(opts.basicAuthUser, opts.basicAuthPass);
       let baseUrl = opts.url;
+      let authHeaders: Record<string, string> | undefined;
       if (!baseUrl) {
         if (opts.instance) {
           const inst = getInstanceConfig(opts.instance);
@@ -161,6 +178,7 @@ ${chalk.dim("Finding your push token:")}
             process.exit(EXIT_CODES.AUTH);
           }
           baseUrl = inst.url;
+          authHeaders = flagHeaders ?? buildBasicAuthHeaders(inst.basicAuthUser, inst.basicAuthPass);
         } else {
           const config = getConfig();
           if (!config) {
@@ -170,7 +188,10 @@ ${chalk.dim("Finding your push token:")}
             process.exit(EXIT_CODES.AUTH);
           }
           baseUrl = config.url;
+          authHeaders = flagHeaders ?? buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass);
         }
+      } else {
+        authHeaders = flagHeaders;
       }
 
       // Build the push URL
@@ -182,6 +203,7 @@ ${chalk.dim("Finding your push token:")}
       try {
         const res = await fetch(pushUrl.toString(), {
           signal: AbortSignal.timeout(10_000),
+          headers: authHeaders ?? {},
         });
 
         if (!res.ok) {

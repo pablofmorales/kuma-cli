@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { KumaClient, createAuthenticatedClient } from "../client.js";
+import { KumaClient, createAuthenticatedClient, buildBasicAuthHeaders } from "../client.js";
 import {
   getAllInstances,
   getAllClusters,
@@ -186,7 +186,7 @@ function Dashboard({
       setConnecting(true);
       setOverlay("none");
       try {
-        const newClient = await createAuthenticatedClient(instConfig.url, instConfig.token);
+        const newClient = await createAuthenticatedClient(instConfig.url, instConfig.token, buildBasicAuthHeaders(instConfig.basicAuthUser, instConfig.basicAuthPass));
         newClient.enableReconnection();
         activeClient.disconnect();
         setActiveClient(newClient);
@@ -228,7 +228,7 @@ function Dashboard({
       setConnecting(true);
       setOverlay("none");
       try {
-        const newClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token);
+        const newClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token, buildBasicAuthHeaders(primaryConfig.basicAuthUser, primaryConfig.basicAuthPass));
         newClient.enableReconnection();
         activeClient.disconnect();
         setActiveClient(newClient);

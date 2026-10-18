@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveInstanceName } from "../instance-manager.js";
+import { resolveInstanceName, resolveClient } from "../instance-manager.js";
 
 vi.mock("../config.js", () => ({
   getInstanceConfig: vi.fn(),
@@ -8,16 +8,19 @@ vi.mock("../config.js", () => ({
   getAllInstances: vi.fn(),
 }));
 
-vi.mock("../client.js", () => ({
-  createAuthenticatedClient: vi.fn(),
-}));
+vi.mock("../client.js", async () => {
+  const actual = await vi.importActual<typeof import("../client.js")>("../client.js");
+  return { ...actual, createAuthenticatedClient: vi.fn() };
+});
 
 import { getInstanceConfig, getClusterConfig, getActiveContext, getAllInstances } from "../config.js";
+import { createAuthenticatedClient, type KumaClient } from "../client.js";
 
 const mockGetInstanceConfig = vi.mocked(getInstanceConfig);
 const mockGetClusterConfig = vi.mocked(getClusterConfig);
 const mockGetActiveContext = vi.mocked(getActiveContext);
 const mockGetAllInstances = vi.mocked(getAllInstances);
+const mockCreateAuthenticatedClient = vi.mocked(createAuthenticatedClient);
 
 describe("resolveInstanceName", () => {
   beforeEach(() => { vi.clearAllMocks(); });
@@ -62,5 +65,44 @@ describe("resolveInstanceName", () => {
     mockGetActiveContext.mockReturnValue(null);
     mockGetAllInstances.mockReturnValue({});
     expect(() => resolveInstanceName({})).toThrow("No instances configured");
+  });
+});
+
+describe("resolveClient", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("passes the instance's stored basic-auth credentials as headers", async () => {
+    mockGetInstanceConfig.mockReturnValue({
+      url: "https://kuma.example.com",
+      token: "tok123",
+      basicAuthUser: "admin",
+      basicAuthPass: "s3cret",
+    });
+    const fakeClient = { disconnect: vi.fn() } as unknown as KumaClient;
+    mockCreateAuthenticatedClient.mockResolvedValue(fakeClient);
+
+    const { client, instanceName } = await resolveClient({ instance: "prod" });
+
+    const expected = Buffer.from("admin:s3cret").toString("base64");
+    expect(mockCreateAuthenticatedClient).toHaveBeenCalledWith(
+      "https://kuma.example.com",
+      "tok123",
+      { Authorization: `Basic ${expected}` }
+    );
+    expect(client).toBe(fakeClient);
+    expect(instanceName).toBe("prod");
+  });
+
+  it("passes undefined headers when the instance has no basic-auth credentials", async () => {
+    mockGetInstanceConfig.mockReturnValue({ url: "https://kuma.example.com", token: "tok123" });
+    mockCreateAuthenticatedClient.mockResolvedValue({} as unknown as KumaClient);
+
+    await resolveClient({ instance: "prod" });
+
+    expect(mockCreateAuthenticatedClient).toHaveBeenCalledWith(
+      "https://kuma.example.com",
+      "tok123",
+      undefined
+    );
   });
 });

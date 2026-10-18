@@ -12,7 +12,7 @@ import enquirer from "enquirer";
 // src/client.ts
 import { io } from "socket.io-client";
 var KumaClient = class {
-  constructor(url) {
+  constructor(url, extraHeaders) {
     // Kuma pushes heartbeatList, uptime, and statusPageList events immediately
     // on connect / after auth, so we buffer them for later use.
     this.heartbeatCache = {};
@@ -25,7 +25,8 @@ var KumaClient = class {
     this.socket = io(url, {
       transports: ["websocket"],
       reconnection: false,
-      timeout: 1e4
+      timeout: 1e4,
+      extraHeaders
     });
     this.socket.on(
       "heartbeatList",
@@ -544,8 +545,13 @@ var KumaClient = class {
     this.socket.disconnect();
   }
 };
-async function createAuthenticatedClient(url, token) {
-  const client = new KumaClient(url);
+function buildBasicAuthHeaders(basicAuthUser, basicAuthPass) {
+  if (!basicAuthUser) return void 0;
+  const encoded = Buffer.from(`${basicAuthUser}:${basicAuthPass ?? ""}`).toString("base64");
+  return { Authorization: `Basic ${encoded}` };
+}
+async function createAuthenticatedClient(url, token, extraHeaders) {
+  const client = new KumaClient(url, extraHeaders);
   await client.connect();
   const ok = await client.loginByToken(token);
   if (!ok) {
@@ -890,7 +896,7 @@ var { prompt } = enquirer;
 function loginCommand(program2) {
   program2.command("login <url>").description(
     "Authenticate with an Uptime Kuma instance and save the session token locally"
-  ).option("--json", "Output as JSON ({ ok, data })").option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)").addHelpText(
+  ).option("--json", "Output as JSON ({ ok, data })").option("--as <alias>", "Save this instance under a custom alias (default: derived from hostname)").option("--basic-auth-user <user>", "HTTP Basic Auth username (for instances behind an auth-gated reverse proxy)").option("--basic-auth-pass <pass>", "HTTP Basic Auth password (for instances behind an auth-gated reverse proxy)").addHelpText(
     "after",
     `
 ${chalk2.dim("Examples:")}
@@ -909,12 +915,16 @@ ${chalk2.dim("Multi-instance workflow:")}
 ${chalk2.dim("Notes:")}
   The --as alias is how you reference this instance in other commands
   (e.g. --instance server1, or when creating clusters).
-  Credentials are never stored \u2014 only the session token is saved.
+  Your Kuma credentials are never stored \u2014 only the session token is saved.
+  (--basic-auth-user/--basic-auth-pass, if provided, are stored with the instance.)
   Token location: run ${chalk2.cyan("kuma status")} to see the config path.
 `
   ).action(async (url, opts) => {
     const json = isJsonMode(opts);
     try {
+      if (opts.basicAuthPass && !opts.basicAuthUser) {
+        handleError(new Error("--basic-auth-pass requires --basic-auth-user"), opts);
+      }
       const normalizedUrl = url.replace(/\/$/, "");
       if (!normalizedUrl.startsWith("https://")) {
         if (json) {
@@ -927,7 +937,7 @@ ${chalk2.dim("Notes:")}
           ));
         }
       }
-      const answers = await prompt([
+      const questions = [
         {
           type: "input",
           name: "username",
@@ -938,9 +948,19 @@ ${chalk2.dim("Notes:")}
           name: "password",
           message: "Password:"
         }
-      ]);
-      const { username, password } = answers;
-      const client = new KumaClient(normalizedUrl);
+      ];
+      if (opts.basicAuthUser && !opts.basicAuthPass) {
+        questions.push({
+          type: "password",
+          name: "proxyPassword",
+          message: "Proxy password (Basic Auth):"
+        });
+      }
+      const answers = await prompt(questions);
+      const { username, password, proxyPassword } = answers;
+      const basicAuthPass = opts.basicAuthPass ?? proxyPassword;
+      const extraHeaders = buildBasicAuthHeaders(opts.basicAuthUser, basicAuthPass);
+      const client = new KumaClient(normalizedUrl, extraHeaders);
       await client.connect();
       const result = await client.login(username, password);
       client.disconnect();
@@ -952,7 +972,15 @@ ${chalk2.dim("Notes:")}
         error(msg);
         process.exit(1);
       }
-      const instanceName = saveConfig({ url: normalizedUrl, token: result.token }, opts.as);
+      const instanceName = saveConfig(
+        {
+          url: normalizedUrl,
+          token: result.token,
+          basicAuthUser: opts.basicAuthUser,
+          basicAuthPass
+        },
+        opts.as
+      );
       if (json) {
         jsonOut({ url: normalizedUrl, username, instanceName });
       }
@@ -1048,7 +1076,7 @@ async function resolveClient(flags) {
   const name = resolveInstanceName(flags);
   const config = getInstanceConfig(name);
   if (!config) throw new Error(`Instance '${name}' not found.`);
-  const client = await createAuthenticatedClient(config.url, config.token);
+  const client = await createAuthenticatedClient(config.url, config.token, buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass));
   return { client, instanceName: name };
 }
 
@@ -1121,7 +1149,7 @@ ${chalk4.dim("Examples:")}
             const instConfig = getInstanceConfig(instanceName);
             if (!instConfig) return [];
             try {
-              const client = await createAuthenticatedClient(instConfig.url, instConfig.token);
+              const client = await createAuthenticatedClient(instConfig.url, instConfig.token, buildBasicAuthHeaders(instConfig.basicAuthUser, instConfig.basicAuthPass));
               const monitorMap = await client.getMonitorList();
               const monitors2 = Object.values(monitorMap);
               client.disconnect();
@@ -1810,13 +1838,14 @@ Showing last ${recent.length} heartbeat(s)`);
       handleError(err, opts);
     }
   });
-  hb.command("send <push-token>").description("Send a push heartbeat to a Kuma push monitor (for scripts and GitHub Actions)").option("--status <status>", "Heartbeat status: up, down, maintenance (default: up)").option("--msg <message>", "Optional status message").option("--ping <ms>", "Optional response time in milliseconds").option("--url <url>", "Kuma base URL (defaults to saved login URL)").option("--instance <name>", "Target a specific instance").option("--json", "Output as JSON ({ ok, data })").addHelpText(
+  hb.command("send <push-token>").description("Send a push heartbeat to a Kuma push monitor (for scripts and GitHub Actions)").option("--status <status>", "Heartbeat status: up, down, maintenance (default: up)").option("--msg <message>", "Optional status message").option("--ping <ms>", "Optional response time in milliseconds").option("--url <url>", "Kuma base URL (defaults to saved login URL)").option("--instance <name>", "Target a specific instance").option("--basic-auth-user <user>", "HTTP Basic Auth username (overrides saved instance credentials)").option("--basic-auth-pass <pass>", "HTTP Basic Auth password (overrides saved instance credentials)").option("--json", "Output as JSON ({ ok, data })").addHelpText(
     "after",
     `
 ${chalk5.dim("Examples:")}
   ${chalk5.cyan("kuma heartbeat send abc123")}
   ${chalk5.cyan('kuma heartbeat send abc123 --status down --msg "Job failed"')}
   ${chalk5.cyan('kuma heartbeat send abc123 --msg "Deploy complete" --ping 42')}
+  ${chalk5.cyan("kuma heartbeat send abc123 --basic-auth-user admin --basic-auth-pass s3cret")}
   ${chalk5.cyan("kuma heartbeat send abc123 --json")}
 
 ${chalk5.dim("GitHub Actions usage:")}
@@ -1847,7 +1876,15 @@ ${chalk5.dim("Finding your push token:")}
       console.error(chalk5.red(`\u274C ${msg}`));
       process.exit(EXIT_CODES.GENERAL);
     }
+    if (opts.basicAuthPass && !opts.basicAuthUser) {
+      const msg = "--basic-auth-pass requires --basic-auth-user";
+      if (json) jsonError(msg, EXIT_CODES.GENERAL);
+      console.error(chalk5.red(`\u274C ${msg}`));
+      process.exit(EXIT_CODES.GENERAL);
+    }
+    const flagHeaders = buildBasicAuthHeaders(opts.basicAuthUser, opts.basicAuthPass);
     let baseUrl = opts.url;
+    let authHeaders;
     if (!baseUrl) {
       if (opts.instance) {
         const inst = getInstanceConfig(opts.instance);
@@ -1858,6 +1895,7 @@ ${chalk5.dim("Finding your push token:")}
           process.exit(EXIT_CODES.AUTH);
         }
         baseUrl = inst.url;
+        authHeaders = flagHeaders ?? buildBasicAuthHeaders(inst.basicAuthUser, inst.basicAuthPass);
       } else {
         const config = getConfig();
         if (!config) {
@@ -1867,7 +1905,10 @@ ${chalk5.dim("Finding your push token:")}
           process.exit(EXIT_CODES.AUTH);
         }
         baseUrl = config.url;
+        authHeaders = flagHeaders ?? buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass);
       }
+    } else {
+      authHeaders = flagHeaders;
     }
     const pushUrl = new URL(`${baseUrl.replace(/\/$/, "")}/api/push/${pushToken}`);
     pushUrl.searchParams.set("status", statusKey);
@@ -1875,7 +1916,8 @@ ${chalk5.dim("Finding your push token:")}
     if (opts.ping) pushUrl.searchParams.set("ping", opts.ping);
     try {
       const res = await fetch(pushUrl.toString(), {
-        signal: AbortSignal.timeout(1e4)
+        signal: AbortSignal.timeout(1e4),
+        headers: authHeaders ?? {}
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
@@ -2727,7 +2769,7 @@ ${chalk11.dim("will be replicated to the other instances during sync.")}
         const config = getInstanceConfig(instanceName);
         if (!config) return { instanceName, reachable: false, error: "Not configured", monitors: 0, healthMonitors: [] };
         try {
-          const client = await createAuthenticatedClient(config.url, config.token);
+          const client = await createAuthenticatedClient(config.url, config.token, buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass));
           const monitorMap = await client.getMonitorList();
           const monitors = Object.values(monitorMap);
           const healthMonitors = monitors.filter((m) => m.name.startsWith("[cluster] "));
@@ -2805,7 +2847,7 @@ ${chalk11.dim("Sync is idempotent \u2014 safe to run multiple times.")}
     }
     let primaryClient;
     try {
-      primaryClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token);
+      primaryClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token, buildBasicAuthHeaders(primaryConfig.basicAuthUser, primaryConfig.basicAuthPass));
     } catch (err) {
       const msg = `Cannot connect to primary '${clusterConfig.primary}': ${err instanceof Error ? err.message : err}`;
       if (isJsonMode(opts)) return jsonError(msg);
@@ -2821,7 +2863,7 @@ ${chalk11.dim("Sync is idempotent \u2014 safe to run multiple times.")}
         continue;
       }
       try {
-        secClients[secName] = await createAuthenticatedClient(secConfig.url, secConfig.token);
+        secClients[secName] = await createAuthenticatedClient(secConfig.url, secConfig.token, buildBasicAuthHeaders(secConfig.basicAuthUser, secConfig.basicAuthPass));
       } catch (err) {
         if (!isJsonMode(opts)) warn(`Skipping '${secName}': ${err instanceof Error ? err.message : err}`);
         continue;
@@ -4199,7 +4241,7 @@ function Dashboard({
       setConnecting(true);
       setOverlay("none");
       try {
-        const newClient = await createAuthenticatedClient(instConfig.url, instConfig.token);
+        const newClient = await createAuthenticatedClient(instConfig.url, instConfig.token, buildBasicAuthHeaders(instConfig.basicAuthUser, instConfig.basicAuthPass));
         newClient.enableReconnection();
         activeClient.disconnect();
         setActiveClient(newClient);
@@ -4240,7 +4282,7 @@ function Dashboard({
       setConnecting(true);
       setOverlay("none");
       try {
-        const newClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token);
+        const newClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token, buildBasicAuthHeaders(primaryConfig.basicAuthUser, primaryConfig.basicAuthPass));
         newClient.enableReconnection();
         activeClient.disconnect();
         setActiveClient(newClient);

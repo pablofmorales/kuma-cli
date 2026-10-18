@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import enquirer from "enquirer";
-import { createAuthenticatedClient, Monitor } from "../client.js";
+import { createAuthenticatedClient, buildBasicAuthHeaders, Monitor } from "../client.js";
 import { getClusterConfig, getInstanceConfig } from "../config.js";
 import { resolveClient } from "../instance-manager.js";
 import {
@@ -126,7 +126,7 @@ ${chalk.dim("Examples:")}
               const instConfig = getInstanceConfig(instanceName);
               if (!instConfig) return [];
               try {
-                const client = await createAuthenticatedClient(instConfig.url, instConfig.token);
+                const client = await createAuthenticatedClient(instConfig.url, instConfig.token, buildBasicAuthHeaders(instConfig.basicAuthUser, instConfig.basicAuthPass));
                 const monitorMap = await client.getMonitorList();
                 const monitors = Object.values(monitorMap);
                 client.disconnect();

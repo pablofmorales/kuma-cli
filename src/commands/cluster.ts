@@ -7,7 +7,7 @@ import {
   getInstanceConfig,
 } from "../config.js";
 import { createTable, success, error, warn, info, isJsonMode, jsonOut, jsonError, statusLabel } from "../utils/output.js";
-import { createAuthenticatedClient } from "../client.js";
+import { createAuthenticatedClient, buildBasicAuthHeaders } from "../client.js";
 import chalk from "chalk";
 
 export function clusterCommand(program: Command): void {
@@ -161,7 +161,7 @@ ${chalk.dim("will be replicated to the other instances during sync.")}
           if (!config) return { instanceName, reachable: false, error: "Not configured", monitors: 0, healthMonitors: [] as { name: string; status?: number }[] };
 
           try {
-            const client = await createAuthenticatedClient(config.url, config.token);
+            const client = await createAuthenticatedClient(config.url, config.token, buildBasicAuthHeaders(config.basicAuthUser, config.basicAuthPass));
             const monitorMap = await client.getMonitorList();
             const monitors = Object.values(monitorMap);
             const healthMonitors = monitors.filter((m) => m.name.startsWith("[cluster] "));
@@ -255,7 +255,7 @@ ${chalk.dim("Sync is idempotent — safe to run multiple times.")}
 
       let primaryClient;
       try {
-        primaryClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token);
+        primaryClient = await createAuthenticatedClient(primaryConfig.url, primaryConfig.token, buildBasicAuthHeaders(primaryConfig.basicAuthUser, primaryConfig.basicAuthPass));
       } catch (err) {
         const msg = `Cannot connect to primary '${clusterConfig.primary}': ${err instanceof Error ? err.message : err}`;
         if (isJsonMode(opts)) return jsonError(msg);
@@ -274,7 +274,7 @@ ${chalk.dim("Sync is idempotent — safe to run multiple times.")}
           continue;
         }
         try {
-          secClients[secName] = await createAuthenticatedClient(secConfig.url, secConfig.token);
+          secClients[secName] = await createAuthenticatedClient(secConfig.url, secConfig.token, buildBasicAuthHeaders(secConfig.basicAuthUser, secConfig.basicAuthPass));
         } catch (err) {
           if (!isJsonMode(opts)) warn(`Skipping '${secName}': ${err instanceof Error ? err.message : err}`);
           continue;

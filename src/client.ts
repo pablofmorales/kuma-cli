@@ -101,12 +101,13 @@ export class KumaClient {
   // Buffer notificationList pushed by Kuma during afterLogin
   private notificationCache: Notification[] | null = null;
 
-  constructor(url: string) {
+  constructor(url: string, extraHeaders?: Record<string, string>) {
     this.url = url;
     this.socket = io(url, {
       transports: ["websocket"],
       reconnection: false,
       timeout: 10000,
+      extraHeaders,
     });
 
     // Buffer heartbeatList events from the moment the socket is created
@@ -696,11 +697,21 @@ export class KumaClient {
   }
 }
 
+export function buildBasicAuthHeaders(
+  basicAuthUser?: string,
+  basicAuthPass?: string
+): Record<string, string> | undefined {
+  if (!basicAuthUser) return undefined;
+  const encoded = Buffer.from(`${basicAuthUser}:${basicAuthPass ?? ""}`).toString("base64");
+  return { Authorization: `Basic ${encoded}` };
+}
+
 export async function createAuthenticatedClient(
   url: string,
-  token: string
+  token: string,
+  extraHeaders?: Record<string, string>
 ): Promise<KumaClient> {
-  const client = new KumaClient(url);
+  const client = new KumaClient(url, extraHeaders);
   await client.connect();
   const ok = await client.loginByToken(token);
   if (!ok) {
